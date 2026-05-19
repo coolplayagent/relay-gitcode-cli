@@ -76,3 +76,13 @@ gd release list --repo owner/repo
 
 codespaces、gists、GitHub Actions workflows、projects、rulesets、extensions、
 Copilot 等 GitHub 专属命令不会进入 `gd`。
+
+## Skill-over-CLI
+
+仓库随附 `skills/relay-gitcode-cli`，这是一个兼容 ClawHub 的 skill，用于让
+LLM agent 通过本地 `gd` CLI 操作 GitCode，并解析 JSON 输出。它覆盖认证检查、
+仓库工作流、Issue、Pull Request、搜索、SSH key、标签、Release、CodeArts
+Pipeline、原始 `gd api` 调用和 shell completion。
+
+该 skill 只保持在 GitCode 支持的 `gd` 行为范围内。除非 GitCode 提供可通过
+`gd api` 访问的等价 API，否则它不会增加 GitHub 专属的 `gh` 命令面。

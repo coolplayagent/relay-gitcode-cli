@@ -80,3 +80,15 @@ gd release list --repo owner/repo
 
 GitHub-only surfaces such as codespaces, gists, GitHub Actions workflows,
 projects, rulesets, extensions, and Copilot are intentionally excluded.
+
+## Skill-over-CLI
+
+The repository ships `skills/relay-gitcode-cli`, a ClawHub-compatible skill for
+LLM agents that should operate GitCode by invoking the local `gd` CLI and
+parsing JSON output. It covers authentication checks, repository workflows,
+issues, pull requests, search, SSH keys, labels, releases, CodeArts Pipeline
+operations, raw `gd api` calls, and shell completion.
+
+The skill intentionally stays within GitCode-backed `gd` behavior. It does not
+add GitHub-only `gh` command surfaces unless GitCode exposes an equivalent API
+that can be reached through `gd api`.

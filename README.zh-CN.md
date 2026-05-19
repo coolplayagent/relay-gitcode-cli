@@ -20,6 +20,22 @@ target/debug/gd repo view owner/repo --json
 `GITCODE_TOKEN` 可用于 CI 和临时端到端测试。没有环境变量 token 时，
 `gd auth login --with-token` 会把 token 保存到系统 keyring。
 
+每个 GitHub Release 还会包含
+`relay-gitcode-cli-skill-<tag>.tar.gz`，这是一个纯文本、兼容 ClawHub
+的 skill，用于引导 LLM agent 通过本地 `gd` CLI 使用 GitCode API v5
+工作流。配置 `CLAWHUB_TOKEN` 后，release workflow 可以把同一个
+`skills/relay-gitcode-cli` 目录发布到 ClawHub：
+
+```bash
+clawhub publish skills/relay-gitcode-cli \
+  --slug relay-gitcode-cli \
+  --name "Relay GitCode CLI" \
+  --version <version>
+```
+
+这条 skill-over-CLI 路径只覆盖 GitCode 支持的 `gd` 命令和 GitCode 原始
+API 调用；GitHub 专属的 `gh` 命令面仍不在范围内。
+
 ## 命令
 
 ```bash
