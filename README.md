@@ -22,6 +22,22 @@ target/debug/gd repo view owner/repo --json
 When no environment token is present, `gd auth login --with-token` stores the
 token in the system keyring.
 
+Each GitHub Release also includes
+`relay-gitcode-cli-skill-<tag>.tar.gz`, a text-only ClawHub-compatible skill
+that teaches LLM agents to use the local `gd` CLI for GitCode API v5 workflows.
+The release workflow can publish the same `skills/relay-gitcode-cli` directory
+to ClawHub when `CLAWHUB_TOKEN` is configured:
+
+```bash
+clawhub publish skills/relay-gitcode-cli \
+  --slug relay-gitcode-cli \
+  --name "Relay GitCode CLI" \
+  --version <version>
+```
+
+This skill-over-CLI path is limited to GitCode-backed `gd` commands and raw
+GitCode API calls; GitHub-only `gh` command surfaces remain out of scope.
+
 ## Commands
 
 ```bash

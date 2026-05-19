@@ -22,6 +22,7 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   BIN_NAME: gd
+  SKILL_NAME: relay-gitcode-cli
 
 jobs:
   verify:
@@ -90,6 +91,19 @@ jobs:
 
       - name: Package crate
         run: cargo package
+
+      - name: Validate CLI skill bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "skills/${SKILL_NAME}/SKILL.md"
+          test -f "skills/${SKILL_NAME}/agents/openai.yaml"
+          test -f "skills/${SKILL_NAME}/references/cli-workflows.md"
+          grep -q '^name: relay-gitcode-cli$' "skills/${SKILL_NAME}/SKILL.md"
+          grep -q 'GITCODE_TOKEN' "skills/${SKILL_NAME}/SKILL.md"
+          grep -q 'gd api /user --json' "skills/${SKILL_NAME}/SKILL.md"
+          grep -q 'Do not use this skill for GitHub-only' "skills/${SKILL_NAME}/SKILL.md"
+          grep -q 'default_prompt: "Use \$relay-gitcode-cli' "skills/${SKILL_NAME}/agents/openai.yaml"
 
       - name: Publish dry run
         run: cargo publish --dry-run
@@ -205,6 +219,44 @@ jobs:
           path: dist/${{ env.BIN_NAME }}-${{ needs.verify.outputs.tag }}-${{ matrix.target }}.${{ matrix.archive }}
           if-no-files-found: error
 
+  skill:
+    name: Package CLI skill
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Validate CLI skill version inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest_version="$(cargo metadata --no-deps --format-version 1 \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["packages"][0]["version"])')"
+          if [[ "$manifest_version" != "${{ needs.verify.outputs.version }}" ]]; then
+            echo "Skill release version must follow Cargo.toml: $manifest_version != ${{ needs.verify.outputs.version }}" >&2
+            exit 1
+          fi
+
+      - name: Create skill archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          package="${SKILL_NAME}-skill-${{ needs.verify.outputs.tag }}"
+          mkdir -p "dist/$package"
+          cp -R "skills/${SKILL_NAME}/." "dist/$package/"
+          tar -C dist -czf "dist/$package.tar.gz" "$package"
+
+      - name: Upload skill archive
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ env.SKILL_NAME }}-skill-${{ needs.verify.outputs.tag }}
+          path: dist/${{ env.SKILL_NAME }}-skill-${{ needs.verify.outputs.tag }}.tar.gz
+          if-no-files-found: error
+
   publish-crate:
     name: Publish crate
     if: github.event_name == 'push' && needs.verify.outputs.publish_crate == 'true'
@@ -232,6 +284,7 @@ jobs:
     needs:
       - verify
       - build
+      - skill
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -265,5 +318,62 @@ jobs:
           gh release create "${{ needs.verify.outputs.tag }}" dist/* \
             --repo "${{ github.repository }}" \
             --title "gd ${{ needs.verify.outputs.tag }}" \
-            --notes "Prebuilt gd archives for Linux, macOS, and Windows." \
+            --notes "Prebuilt gd archives for Linux, macOS, and Windows. This release also includes ${{ env.SKILL_NAME }}-skill-${{ needs.verify.outputs.tag }}.tar.gz for ClawHub-compatible CLI skill publishing." \
             "${prerelease_flag[@]}"
+
+  publish-skill:
+    name: Publish ClawHub skill
+    if: github.event_name == 'push'
+    needs:
+      - verify
+      - release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Check ClawHub token
+        id: clawhub-token
+        env:
+          CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${CLAWHUB_TOKEN:-}" ]]; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "CLAWHUB_TOKEN is not configured; skipping ClawHub publish."
+            exit 0
+          fi
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node
+        if: steps.clawhub-token.outputs.publish == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install ClawHub CLI
+        if: steps.clawhub-token.outputs.publish == 'true'
+        run: npm install -g clawhub
+
+      - name: Publish skill
+        if: steps.clawhub-token.outputs.publish == 'true'
+        env:
+          CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tags="latest"
+          if [[ "${{ needs.verify.outputs.prerelease }}" == "true" ]]; then
+            tags="prerelease"
+          fi
+
+          clawhub --no-input login --token "$CLAWHUB_TOKEN"
+          clawhub publish "skills/${SKILL_NAME}" \
+            --slug "${SKILL_NAME}" \
+            --name "Relay GitCode CLI" \
+            --version "${{ needs.verify.outputs.version }}" \
+            --changelog "gd ${{ needs.verify.outputs.tag }}" \
+            --tags "$tags"

@@ -9,6 +9,7 @@ This repository ships CI for both GitHub Actions and GitCode Pipeline.
 - Require `Qodana` if `QODANA_TOKEN` is configured.
 - Configure release secrets:
   - `CARGO_REGISTRY_TOKEN` for crates.io publishing.
+  - `CLAWHUB_TOKEN` for optional ClawHub skill publishing.
   - `QODANA_TOKEN` for JetBrains Qodana Cloud reporting.
 
 ## GitCode

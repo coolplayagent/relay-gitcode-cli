@@ -13,7 +13,13 @@ The gate runs formatting, clippy with warnings denied, tests, and a build.
 - `PR Checks`: format, clippy, test, build.
 - `Qodana`: Rust static analysis.
 - `Release`: version validation, package dry run, multi-platform binary builds,
-  archive upload, and GitHub Release creation.
+  CLI skill packaging, archive upload, checksum generation, and GitHub Release
+  creation.
+
+GitHub Releases include `relay-gitcode-cli-skill-<tag>.tar.gz`, built from
+`skills/relay-gitcode-cli` with the same version as `Cargo.toml`. When
+`CLAWHUB_TOKEN` is configured, the release workflow also publishes that
+directory to ClawHub with `clawhub publish`.
 
 ## GitCode Pipeline
 
