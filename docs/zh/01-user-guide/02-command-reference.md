@@ -81,7 +81,7 @@ Copilot 等 GitHub 专属命令不会进入 `gd`。
 
 仓库随附 `skills/relay-gitcode-cli`，这是一个兼容 ClawHub 的 skill，用于让
 LLM agent 通过本地 `gd` CLI 操作 GitCode，并解析 JSON 输出。它覆盖认证检查、
-仓库工作流、Issue、Pull Request、搜索、SSH key、标签、Release、CodeArts
+仓库工作流、Issue、Pull Request、搜索、SSH key、标签、Release、GitCode
 Pipeline、原始 `gd api` 调用和 shell completion。
 
 该 skill 只保持在 GitCode 支持的 `gd` 行为范围内。除非 GitCode 提供可通过
