@@ -1,18 +1,23 @@
-use std::io::Read;
+use std::{io::Read, path::Path};
 
 use anyhow::{Context, bail};
 use clap_complete::{Generator, Shell as CompleteShell, generate};
-use serde_json::json;
+use serde_json::{Value, json};
 
 use crate::{
     auth::CredentialStore,
     cli::{
-        AuthCommand, Cli, Command, CompletionArgs, IssueCommand, LabelCommand, PrCommand,
-        ReleaseCommand, RepoCommand, SearchCommand, Shell, SshKeyCommand,
+        AuthCommand, Cli, Command, CompletionArgs, GlobalArgs, IssueCommand, LabelCommand,
+        PipelineCommand, PrCommand, ReleaseCommand, RepoCommand, SearchCommand, Shell,
+        SshKeyCommand,
     },
     client::{ApiRequest, GitcodeClient, form_body, merge_pages, query},
     config::Config,
     output::print_value,
+    pipeline::{
+        PipelineAuth, PipelineClient, PipelineRegisterRequest, PipelineRunRequest,
+        PipelineRunsRequest, parse_pipeline_api_base, validate_file_content_source,
+    },
     repo,
 };
 
@@ -26,7 +31,7 @@ pub async fn run(
         Command::Auth(command) => auth(command, &mut config, credentials, cli.global.json).await,
         other => {
             let token = credentials.get_token(&config.hostname)?;
-            let client = GitcodeClient::new(config.api_base_url()?, token);
+            let client = GitcodeClient::new(config.api_base_url()?, token.clone());
             match other {
                 Command::Api(args) => {
                     let responses = client
@@ -72,6 +77,9 @@ pub async fn run(
                 }
                 Command::Release(command) => {
                     release_command(command, &config, &client, cli.global.json).await
+                }
+                Command::Pipeline(command) => {
+                    pipeline_command(command, &config, &cli.global, token, cli.global.json).await
                 }
                 Command::Completion(_) | Command::Auth(_) => unreachable!(),
             }
@@ -456,6 +464,106 @@ async fn release_command(
     }
 }
 
+async fn pipeline_command(
+    command: PipelineCommand,
+    config: &Config,
+    global: &GlobalArgs,
+    token: Option<String>,
+    json_output: bool,
+) -> anyhow::Result<()> {
+    let client = pipeline_client(global, token)?;
+    match command {
+        PipelineCommand::Register(args) => {
+            validate_file_content_source(args.file_content.as_deref(), args.file.as_deref())?;
+            let repository =
+                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())?;
+            let file_content = read_optional_content(args.file_content, args.file.as_deref())?;
+            let value = client
+                .register(PipelineRegisterRequest {
+                    kind: args.kind,
+                    https_url: repo::clone_url(&config.hostname, &repository),
+                    repo_id: args.repo_id,
+                    old_file_path: args.old_file_path,
+                    new_file_path: args.new_file_path,
+                    file_content,
+                    encoding: args.encoding,
+                    default_branch: args.default_branch,
+                    file_commit_id: args.file_commit_id,
+                })
+                .await?;
+            print_value(json_output, &value)
+        }
+        PipelineCommand::Run(args) => {
+            validate_file_content_source(args.file_content.as_deref(), args.file.as_deref())?;
+            let https_url =
+                resolve_pipeline_https_url(args.repository.as_deref(), args.https_url, config)?;
+            let file_content = read_optional_content(args.file_content, args.file.as_deref())?;
+            let value = client
+                .run(PipelineRunRequest {
+                    https_url,
+                    file_path: args.file_path,
+                    file_content,
+                    branch: args.branch,
+                    encoding: args.encoding,
+                    tag: args.tag,
+                    commit_id: args.commit_id,
+                    access_token: args.access_token,
+                })
+                .await?;
+            print_value(json_output, &value)
+        }
+        PipelineCommand::Runs(args) => {
+            let https_url =
+                resolve_pipeline_https_url(args.repository.as_deref(), args.https_url, config)?;
+            let value = client
+                .runs(PipelineRunsRequest {
+                    https_url,
+                    pipeline_name: args.pipeline_name,
+                    file_path: args.file_path,
+                    pipeline_run_name: args.pipeline_run_name,
+                    event: args.event,
+                    actor: args.actor,
+                    branch: args.branch,
+                    status: args.status,
+                    offset: args.offset,
+                    limit: args.limit,
+                })
+                .await?;
+            print_value(json_output, &value)
+        }
+        PipelineCommand::View(args) => {
+            let value = client
+                .view(&args.pipeline_id, &args.pipeline_run_id)
+                .await?;
+            print_value(json_output, &value)
+        }
+        PipelineCommand::Log(args) => {
+            let value = client
+                .log(
+                    &args.pipeline_id,
+                    &args.pipeline_run_id,
+                    &args.job_run_id,
+                    args.offset,
+                    args.limit,
+                )
+                .await?;
+            print_pipeline_log(json_output, &value)
+        }
+        PipelineCommand::Stop(args) => {
+            let value = client
+                .stop(&args.pipeline_id, &args.pipeline_run_id)
+                .await?;
+            print_value(json_output, &value)
+        }
+        PipelineCommand::Retry(args) => {
+            let value = client
+                .retry(args.pipeline_id, args.pipeline_run_id, args.access_token)
+                .await?;
+            print_value(json_output, &value)
+        }
+    }
+}
+
 fn completion(args: CompletionArgs) -> anyhow::Result<()> {
     let mut command = Cli::command_for_completion();
     let name = command.get_name().to_string();
@@ -477,5 +585,69 @@ fn join(values: Vec<String>) -> Option<String> {
         None
     } else {
         Some(values.join(","))
+    }
+}
+
+fn pipeline_client(global: &GlobalArgs, token: Option<String>) -> anyhow::Result<PipelineClient> {
+    let api_base = global
+        .pipeline_api_base
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("set --pipeline-api-base or GITCODE_PIPELINE_API_BASE"))?;
+    let domain_id = global
+        .pipeline_domain_id
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| anyhow::anyhow!("set --pipeline-domain-id or GITCODE_PIPELINE_DOMAIN_ID"))?;
+    let auth = PipelineAuth::from_env_or_token(token)?;
+    Ok(PipelineClient::new(
+        parse_pipeline_api_base(api_base)?,
+        domain_id.to_string(),
+        auth,
+    ))
+}
+
+fn resolve_pipeline_https_url(
+    repository: Option<&str>,
+    https_url: Option<String>,
+    config: &Config,
+) -> anyhow::Result<String> {
+    if let Some(https_url) = https_url {
+        if repository.is_some() {
+            bail!("use either --repo or --https-url, not both");
+        }
+        return Ok(https_url);
+    }
+    let repository = repo::resolve_repo(repository, config.default_repo.as_deref())?;
+    Ok(repo::clone_url(&config.hostname, &repository))
+}
+
+fn read_optional_content(
+    file_content: Option<String>,
+    file: Option<&Path>,
+) -> anyhow::Result<Option<String>> {
+    if let Some(file) = file {
+        let content = if file == Path::new("-") {
+            std::io::read_to_string(std::io::stdin())?
+        } else {
+            std::fs::read_to_string(file)
+                .with_context(|| format!("failed to read {}", file.display()))?
+        };
+        return Ok(Some(content));
+    }
+    Ok(file_content)
+}
+
+fn print_pipeline_log(json_output: bool, value: &Value) -> anyhow::Result<()> {
+    if json_output {
+        return print_value(true, value);
+    }
+    if let Some(log) = value.get("log").and_then(Value::as_str) {
+        print!("{log}");
+        if !log.ends_with('\n') {
+            println!();
+        }
+        Ok(())
+    } else {
+        print_value(false, value)
     }
 }

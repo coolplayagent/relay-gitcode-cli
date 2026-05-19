@@ -34,6 +34,29 @@ gd pr view 1 --repo owner/repo
 gd pr create --repo owner/repo --title "change" --body "details" --base main --head feature
 ```
 
+## GitCode 流水线命令
+
+流水线命令调用 CodeArts Pipeline 的 GitCode API。将
+`GITCODE_PIPELINE_API_BASE` 设置为区域 endpoint，例如
+`https://devcloud.ap-southeast-3.myhuaweicloud.com`，并将
+`GITCODE_PIPELINE_DOMAIN_ID` 设置为租户 domain ID。推荐使用
+`HUAWEICLOUD_SDK_AK`/`HUAWEICLOUD_SDK_SK` 或
+`CLOUD_SDK_AK`/`CLOUD_SDK_SK` 进行 AK/SK 签名；未配置 AK/SK 时，
+`gd` 会回退使用已保存的 GitCode token 作为 Bearer token。
+
+```bash
+gd pipeline register --repo owner/repo --type create --new-file-path .gitcode/workflows/ci.yml --file workflow.yml
+gd pipeline run --repo owner/repo --file-path .gitcode/workflows/ci.yml --branch main
+gd pipeline runs --repo owner/repo --pipeline-name ci --status success
+gd pipeline view pipeline-id pipeline-run-id
+gd pipeline log pipeline-id pipeline-run-id job-run-id
+gd pipeline stop pipeline-id pipeline-run-id
+gd pipeline retry pipeline-id pipeline-run-id
+```
+
+可用 `--pipeline-api-base` 和 `--pipeline-domain-id` 为单次命令覆盖环境变量。
+`gd pipeline log` 默认输出原始日志文本；添加 `--json` 可保留完整响应结构。
+
 ## 其他 GitCode 资源
 
 ```bash

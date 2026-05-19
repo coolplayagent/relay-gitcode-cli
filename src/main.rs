@@ -4,6 +4,7 @@ mod client;
 mod commands;
 mod config;
 mod output;
+mod pipeline;
 mod repo;
 
 use anyhow::Context;

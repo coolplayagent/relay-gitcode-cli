@@ -46,6 +46,11 @@ gd pr list --repo owner/repo
 gd pr view 1 --repo owner/repo
 gd pr create --repo owner/repo --title "change" --body "details" --base main --head feature
 
+gd pipeline register --repo owner/repo --type create --new-file-path .gitcode/workflows/ci.yml --file workflow.yml
+gd pipeline run --repo owner/repo --file-path .gitcode/workflows/ci.yml --branch main
+gd pipeline runs --repo owner/repo --pipeline-name ci
+gd pipeline log pipeline-id pipeline-run-id job-run-id
+
 gd search repos query
 gd search issues query
 gd search users query
