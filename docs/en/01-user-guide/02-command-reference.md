@@ -8,9 +8,16 @@ behavior.
 ```bash
 gd auth login --with-token
 gd auth status --json
+gd auth status --format json
 gd api /user --json
 gd completion bash
 ```
+
+`--json` and `--format json` both render successful command output as JSON.
+When command parsing fails and either flag is present, `gd` writes a single-line
+JSON diagnostic to stderr with `error`, `matched_path`, `unexpected_token`,
+`expected`, `suggestion`, and `usage` fields. Text diagnostics include best-effort
+`Try:` and `Usage:` lines.
 
 ## Repository Commands
 

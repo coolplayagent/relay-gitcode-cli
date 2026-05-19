@@ -7,9 +7,15 @@
 ```bash
 gd auth login --with-token
 gd auth status --json
+gd auth status --format json
 gd api /user --json
 gd completion bash
 ```
+
+`--json` 与 `--format json` 都会将成功命令的输出渲染为 JSON。命令解析失败
+时，如果传入任一标志，`gd` 会向 stderr 写入单行 JSON diagnostic，字段包括
+`error`、`matched_path`、`unexpected_token`、`expected`、`suggestion` 和
+`usage`。文本 diagnostic 会尽量包含 `Try:` 与 `Usage:` 行。
 
 ## 仓库命令
 

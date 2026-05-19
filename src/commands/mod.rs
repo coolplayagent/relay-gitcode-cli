@@ -28,9 +28,10 @@ pub async fn run(
     mut config: Config,
     credentials: &dyn CredentialStore,
 ) -> anyhow::Result<()> {
+    let json_output = cli.global.json_output();
     match cli.command {
         Command::Completion(args) => completion(args),
-        Command::Auth(command) => auth(command, &mut config, credentials, cli.global.json).await,
+        Command::Auth(command) => auth(command, &mut config, credentials, json_output).await,
         other => {
             let token = credentials.get_token(&config.hostname)?;
             let client = GitcodeClient::new(config.api_base_url()?, token.clone());
@@ -57,31 +58,27 @@ pub async fn run(
                                 println!();
                             }
                         }
-                        print_value(cli.global.json, &merge_pages(responses))?;
+                        print_value(json_output, &merge_pages(responses))?;
                     }
                     Ok(())
                 }
                 Command::Repo(command) => {
-                    repo_command(command, &config, &client, cli.global.json).await
+                    repo_command(command, &config, &client, json_output).await
                 }
                 Command::Issue(command) => {
-                    issue_command(command, &config, &client, cli.global.json).await
+                    issue_command(command, &config, &client, json_output).await
                 }
-                Command::Pr(command) => {
-                    pr_command(command, &config, &client, cli.global.json).await
-                }
-                Command::Search(command) => search_command(command, &client, cli.global.json).await,
-                Command::SshKey(command) => {
-                    ssh_key_command(command, &client, cli.global.json).await
-                }
+                Command::Pr(command) => pr_command(command, &config, &client, json_output).await,
+                Command::Search(command) => search_command(command, &client, json_output).await,
+                Command::SshKey(command) => ssh_key_command(command, &client, json_output).await,
                 Command::Label(command) => {
-                    label_command(command, &config, &client, cli.global.json).await
+                    label_command(command, &config, &client, json_output).await
                 }
                 Command::Release(command) => {
-                    release_command(command, &config, &client, cli.global.json).await
+                    release_command(command, &config, &client, json_output).await
                 }
                 Command::Pipeline(command) => {
-                    pipeline_command(command, &config, &client, token, cli.global.json).await
+                    pipeline_command(command, &config, &client, token, json_output).await
                 }
                 Command::Completion(_) | Command::Auth(_) => unreachable!(),
             }
