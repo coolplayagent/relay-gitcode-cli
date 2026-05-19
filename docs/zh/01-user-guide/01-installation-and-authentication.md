@@ -1,13 +1,22 @@
 # 第一章：安装与认证
 
-## 从源码构建
+## 从发布版本安装
+
+Rust 用户可以用发布到 crates.io 的包安装或升级 CLI：
 
 ```bash
-cargo build
-target/debug/gd --version
+cargo install relay-gitcode-cli --force
+gd --version
+gd version check --json
 ```
 
-构建优化后的二进制：
+也可以从 GitHub Releases 下载对应平台归档，并把 `gd` 二进制放到
+`PATH` 中。`gd version check` 会从 GitHub Releases 和 crates.io
+报告可用稳定版本；它不会替换当前二进制。
+
+## 从源码构建
+
+本地开发时可构建优化后的二进制：
 
 ```bash
 ./build.sh
