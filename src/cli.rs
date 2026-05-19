@@ -616,6 +616,12 @@ pub enum PrCommand {
     View(PrViewArgs),
     #[command(about = "Create a pull request")]
     Create(PrCreateArgs),
+    #[command(about = "List pull request review comments")]
+    Comments(PrCommentsArgs),
+    #[command(about = "Add a pull request review comment")]
+    Comment(PrCommentArgs),
+    #[command(about = "Reply to a pull request review discussion")]
+    Reply(PrReplyArgs),
 }
 
 #[derive(Debug, Args)]
@@ -653,6 +659,38 @@ pub struct PrCreateArgs {
     pub label: Vec<String>,
     #[arg(short = 'a', long)]
     pub assignee: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct PrCommentsArgs {
+    pub number: u64,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct PrCommentArgs {
+    pub number: u64,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(short = 'b', long)]
+    pub body: String,
+    #[arg(long)]
+    pub path: Option<String>,
+    #[arg(long)]
+    pub position: Option<u64>,
+    #[arg(long)]
+    pub need_to_resolve: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct PrReplyArgs {
+    pub number: u64,
+    pub discussion_id: String,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(short = 'b', long)]
+    pub body: String,
 }
 
 #[derive(Debug, Subcommand)]
@@ -790,6 +828,8 @@ pub enum PipelineCommand {
         visible_alias = "register"
     )]
     Set(PipelineSetArgs),
+    #[command(about = "Create or update a GitCode CodeCheck workflow file")]
+    Codecheck(PipelineCodecheckArgs),
     #[command(about = "List GitCode workflow files")]
     List(PipelineListArgs),
     #[command(about = "Manually run a GitCode workflow")]
@@ -825,6 +865,36 @@ pub struct PipelineSetArgs {
     pub branch: Option<String>,
     #[arg(long)]
     pub sha: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct PipelineCodecheckArgs {
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(long, default_value = ".gitcode/workflows/codecheck.yml")]
+    pub path: String,
+    #[arg(long, value_enum, default_value_t = PipelineSetMode::Create)]
+    pub mode: PipelineSetMode,
+    #[arg(
+        short = 'm',
+        long,
+        default_value = "Configure GitCode CodeCheck workflow"
+    )]
+    pub message: String,
+    #[arg(long = "commit-branch")]
+    pub commit_branch: Option<String>,
+    #[arg(long)]
+    pub sha: Option<String>,
+    #[arg(long, default_value = "codecheck-pipeline")]
+    pub name: String,
+    #[arg(long = "check-branch")]
+    pub check_branch: Option<String>,
+    #[arg(long = "repo-url")]
+    pub repo_url: Option<String>,
+    #[arg(long = "language")]
+    pub languages: Vec<String>,
+    #[arg(long = "access-token-secret", default_value = "CODECHECK_ACCESS_TOKEN")]
+    pub access_token_secret: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -1071,6 +1141,67 @@ mod tests {
     }
 
     #[test]
+    fn parses_pr_comments_comment_and_reply() {
+        let comments =
+            Cli::try_parse_from(["gd", "pr", "comments", "7", "--repo", "owner/repo"]).unwrap();
+        match comments.command {
+            Command::Pr(PrCommand::Comments(args)) => {
+                assert_eq!(args.number, 7);
+                assert_eq!(args.repository.as_deref(), Some("owner/repo"));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        let comment = Cli::try_parse_from([
+            "gd",
+            "pr",
+            "comment",
+            "7",
+            "--repo",
+            "owner/repo",
+            "--body",
+            "please fix",
+            "--path",
+            "src/main.rs",
+            "--position",
+            "3",
+            "--need-to-resolve",
+        ])
+        .unwrap();
+        match comment.command {
+            Command::Pr(PrCommand::Comment(args)) => {
+                assert_eq!(args.number, 7);
+                assert_eq!(args.body, "please fix");
+                assert_eq!(args.path.as_deref(), Some("src/main.rs"));
+                assert_eq!(args.position, Some(3));
+                assert!(args.need_to_resolve);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        let reply = Cli::try_parse_from([
+            "gd",
+            "pr",
+            "reply",
+            "7",
+            "discussion-1",
+            "--repo",
+            "owner/repo",
+            "--body",
+            "done",
+        ])
+        .unwrap();
+        match reply.command {
+            Command::Pr(PrCommand::Reply(args)) => {
+                assert_eq!(args.number, 7);
+                assert_eq!(args.discussion_id, "discussion-1");
+                assert_eq!(args.body, "done");
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
     fn parses_api_typed_and_raw_fields() {
         let cli =
             Cli::try_parse_from(["gd", "api", "/user", "-X", "POST", "-f", "a=b", "-F", "n=2"])
@@ -1112,6 +1243,37 @@ mod tests {
                 assert_eq!(args.content.as_deref(), Some("name: ci"));
                 assert_eq!(args.mode, PipelineSetMode::Update);
                 assert_eq!(args.sha.as_deref(), Some("abc"));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_pipeline_codecheck() {
+        let cli = Cli::try_parse_from([
+            "gd",
+            "pipeline",
+            "codecheck",
+            "--repo",
+            "owner/repo",
+            "--language",
+            "SHELL",
+            "--language",
+            "RUST",
+            "--check-branch",
+            "main",
+            "--access-token-secret",
+            "CODECHECK_TOKEN",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Command::Pipeline(PipelineCommand::Codecheck(args)) => {
+                assert_eq!(args.repository.as_deref(), Some("owner/repo"));
+                assert_eq!(args.path, ".gitcode/workflows/codecheck.yml");
+                assert_eq!(args.languages, ["SHELL", "RUST"]);
+                assert_eq!(args.check_branch.as_deref(), Some("main"));
+                assert_eq!(args.access_token_secret, "CODECHECK_TOKEN");
             }
             other => panic!("unexpected command: {other:?}"),
         }

@@ -64,8 +64,12 @@ gd issue comment 1 --repo owner/repo --body "thanks"
 gd pr list --repo owner/repo
 gd pr view 1 --repo owner/repo
 gd pr create --repo owner/repo --title "change" --body "details" --base main --head feature
+gd pr comments 1 --repo owner/repo
+gd pr comment 1 --repo owner/repo --body "please fix" --path src/main.rs --position 3
+gd pr reply 1 discussion-id --repo owner/repo --body "fixed"
 
 gd pipeline set --repo owner/repo .gitcode/workflows/ci.yml --file workflow.yml
+gd pipeline codecheck --repo owner/repo --language SHELL --access-token-secret CODECHECK_ACCESS_TOKEN
 gd pipeline list --repo owner/repo
 gd pipeline run --repo owner/repo workflow-id --file-path .gitcode/workflows/ci.yml --branch main
 gd pipeline runs --repo owner/repo --workflow-name ci
