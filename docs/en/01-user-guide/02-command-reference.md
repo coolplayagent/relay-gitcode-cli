@@ -86,7 +86,7 @@ projects, rulesets, extensions, and Copilot are intentionally excluded.
 The repository ships `skills/relay-gitcode-cli`, a ClawHub-compatible skill for
 LLM agents that should operate GitCode by invoking the local `gd` CLI and
 parsing JSON output. It covers authentication checks, repository workflows,
-issues, pull requests, search, SSH keys, labels, releases, CodeArts Pipeline
+issues, pull requests, search, SSH keys, labels, releases, GitCode Pipeline
 operations, raw `gd api` calls, and shell completion.
 
 The skill intentionally stays within GitCode-backed `gd` behavior. It does not

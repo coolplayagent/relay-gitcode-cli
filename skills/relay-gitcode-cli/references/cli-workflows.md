@@ -8,7 +8,7 @@
 - [Issue and Pull Request Workflows](#issue-and-pull-request-workflows)
 - [Search, SSH Keys, Labels, and Releases](#search-ssh-keys-labels-and-releases)
 - [Raw GitCode API Calls](#raw-gitcode-api-calls)
-- [CodeArts Pipeline Workflows](#codearts-pipeline-workflows)
+- [GitCode Pipeline Workflows](#gitcode-pipeline-workflows)
 - [Out of Scope](#out-of-scope)
 
 ## Installation and Authentication
@@ -166,29 +166,33 @@ Field modes:
 - `--include` prints HTTP status and headers before the body.
 - `--silent` suppresses response printing but still fails on non-success status.
 
-## CodeArts Pipeline Workflows
+## GitCode Pipeline Workflows
 
-Configure the regional API base and tenant domain:
-
-```bash
-export GITCODE_PIPELINE_API_BASE="https://devcloud.ap-southeast-3.myhuaweicloud.com"
-export GITCODE_PIPELINE_DOMAIN_ID="domain-id"
-```
-
-Prefer AK/SK signing when available:
+Pipeline commands reuse the same GitCode personal access token as other
+commands. Provide it through `GITCODE_TOKEN` for automation or
+`gd auth login --with-token` for keyring-backed sessions; `gd` sends
+`Authorization: Bearer <token>` to both GitCode API v5 and GitCode Actions
+endpoints. Do not configure AK/SK, HuaweiCloud SDK signing variables, or a
+separate pipeline tenant/domain credential flow.
 
 ```bash
-export HUAWEICLOUD_SDK_AK="..."
-export HUAWEICLOUD_SDK_SK="..."
+GITCODE_TOKEN="$GITCODE_TOKEN" gd pipeline list --repo owner/repo --json
 ```
 
 Register or update a workflow file:
 
 ```bash
-gd pipeline register \
+gd pipeline set \
   --repo owner/repo \
-  --type create \
-  --new-file-path .gitcode/workflows/ci.yml \
+  .gitcode/workflows/ci.yml \
+  --file workflow.yml \
+  --json
+
+gd pipeline set \
+  --repo owner/repo \
+  .gitcode/workflows/ci.yml \
+  --mode update \
+  --sha file-sha \
   --file workflow.yml \
   --json
 ```
@@ -196,17 +200,18 @@ gd pipeline register \
 Run and inspect pipelines:
 
 ```bash
-gd pipeline run --repo owner/repo --file-path .gitcode/workflows/ci.yml --branch main --json
-gd pipeline runs --repo owner/repo --pipeline-name ci --status success --limit 20 --json
-gd pipeline view pipeline-id pipeline-run-id --json
-gd pipeline log pipeline-id pipeline-run-id job-run-id
+gd pipeline run --repo owner/repo workflow-id --file-path .gitcode/workflows/ci.yml --branch main --json
+gd pipeline runs --repo owner/repo --workflow-name ci --status success --limit 20 --json
+gd pipeline view --repo owner/repo workflow-run-id --json
+gd pipeline log --repo owner/repo workflow-run-id job-id
 ```
 
 Control a run:
 
 ```bash
-gd pipeline stop pipeline-id pipeline-run-id --json
-gd pipeline retry pipeline-id pipeline-run-id --json
+gd pipeline stop --repo owner/repo workflow-run-id --json
+gd pipeline retry --repo owner/repo workflow-run-id --job-run-id job-run-id --json
+gd pipeline rerun --repo owner/repo workflow-run-id --json
 ```
 
 `gd pipeline log` prints raw log text by default. Add `--json` when callers need

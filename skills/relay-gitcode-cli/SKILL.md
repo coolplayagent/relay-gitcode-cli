@@ -1,6 +1,6 @@
 ---
 name: relay-gitcode-cli
-description: Use gd, the relay-gitcode-cli GitCode command line client, for GitCode API v5 workflows including authentication, repositories, pull requests, issues, search, SSH keys, labels, releases, CodeArts Pipeline operations, raw API calls, JSON automation, and shell completion. Use when an agent should operate GitCode by running local gd commands. Do not use this skill for GitHub-only gh surfaces unless GitCode exposes an equivalent API through gd or gd api.
+description: Use gd, the relay-gitcode-cli GitCode command line client, for GitCode API v5 workflows including authentication, repositories, pull requests, issues, search, SSH keys, labels, releases, GitCode Pipeline operations, raw API calls, JSON automation, and shell completion. Use when an agent should operate GitCode by running local gd commands. Do not use this skill for GitHub-only gh surfaces unless GitCode exposes an equivalent API through gd or gd api.
 ---
 
 # Relay GitCode CLI
@@ -81,29 +81,26 @@ gd api /repos/owner/repo/issues --paginate --json
 
 ## Pipelines
 
-Pipeline commands call CodeArts Pipeline GitCode APIs. Set the regional API
-base and tenant domain ID before running pipeline workflows. Prefer AK/SK
-environment variables for signing; token fallback is available when AK/SK is
-not configured.
+Pipeline commands call GitCode Actions APIs. They reuse the same GitCode
+personal access token as other `gd` commands through `GITCODE_TOKEN` or
+`gd auth login --with-token`, sending it as `Authorization: Bearer <token>`.
+Do not configure or ask for AK/SK credentials for pipeline workflows.
 
 ```bash
-export GITCODE_PIPELINE_API_BASE="https://devcloud.ap-southeast-3.myhuaweicloud.com"
-export GITCODE_PIPELINE_DOMAIN_ID="domain-id"
-
-gd pipeline register --repo owner/repo --type create --new-file-path .gitcode/workflows/ci.yml --file workflow.yml --json
-gd pipeline run --repo owner/repo --file-path .gitcode/workflows/ci.yml --branch main --json
-gd pipeline runs --repo owner/repo --pipeline-name ci --status success --json
-gd pipeline view pipeline-id pipeline-run-id --json
-gd pipeline log pipeline-id pipeline-run-id job-run-id
-gd pipeline stop pipeline-id pipeline-run-id --json
-gd pipeline retry pipeline-id pipeline-run-id --json
+gd pipeline set --repo owner/repo .gitcode/workflows/ci.yml --file workflow.yml --json
+gd pipeline run --repo owner/repo workflow-id --file-path .gitcode/workflows/ci.yml --branch main --json
+gd pipeline runs --repo owner/repo --workflow-name ci --status success --json
+gd pipeline view --repo owner/repo workflow-run-id --json
+gd pipeline log --repo owner/repo workflow-run-id job-id
+gd pipeline stop --repo owner/repo workflow-run-id --json
+gd pipeline retry --repo owner/repo workflow-run-id --json
 ```
 
 ## Troubleshooting
 
 If a command fails, read the JSON response or the `gd:` error line before
-guessing hidden state. Check authentication, repository spelling, API base, and
-pipeline environment variables first:
+guessing hidden state. Check authentication, repository spelling, hostname, and
+API base first:
 
 ```bash
 gd auth status --json
