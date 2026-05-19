@@ -21,6 +21,10 @@ gd repo view owner/repo --json
 `GITCODE_TOKEN` 可用于 CI 和临时端到端测试。没有环境变量 token 时，
 `gd auth login --with-token` 会把 token 保存到系统 keyring。
 
+OpenLibing 提供的流水线门禁使用独立凭据。交互场景使用
+`gd pipeline auth login` 完成浏览器 OAuth；自动化场景可设置
+`GD_OPENLIBING_TOKEN` 或 `GD_OPENLIBING_COOKIE`。
+
 每个 GitHub Release 还会包含
 `relay-gitcode-cli-skill-<tag>.tar.gz`，这是一个纯文本、兼容 ClawHub
 的 skill，用于引导 LLM agent 通过本地 `gd` CLI 使用 GitCode API v5
@@ -70,7 +74,16 @@ gd pipeline codecheck --repo owner/repo --language SHELL --access-token-secret C
 gd pipeline list --repo owner/repo
 gd pipeline run --repo owner/repo workflow-id --file-path .gitcode/workflows/ci.yml --branch main
 gd pipeline runs --repo owner/repo --workflow-name ci
+gd pipeline view --repo owner/repo workflow-run-id
 gd pipeline log --repo owner/repo workflow-run-id job-id
+gd pipeline auth login
+gd pipeline auth status
+gd pipeline config --project-id openlibing-project-id
+gd pipeline setup --project-id openlibing-project-id --repo owner/repo --language Rust --codecheck-rule-set default
+gd pipeline prs --project-id openlibing-project-id --repo owner/repo
+gd pipeline checks --project-id openlibing-project-id --repo owner/repo --pr 1
+gd pipeline gate-view --project-id openlibing-project-id --repo owner/repo --pr 1
+gd pipeline gate-runs --project-id openlibing-project-id --pipeline-name codecheck
 
 gd search repos query
 gd search issues query
@@ -81,6 +94,14 @@ gd release list --repo owner/repo
 gd version check
 gd completion bash
 ```
+
+当 OpenLibing CICD PR 检查接口不可读时，`gd pipeline checks` 会回退查询
+OpenLibing CodeCheck 任务汇总。`gd pipeline setup --codecheck-rule-set`
+既可传规则集名称，也可直接传规则集 ID。
+OpenLibing 帮助中心中的正确流程要求先由项目管理员或等价项目审批人员维护
+仓库：在代码仓管理中录入 GitCode 仓库，开启 PR 接管，选择 CodeCheck 语言和
+规则集，确保 GitCode 公共账号或机器人账号具备仓库访问权限，并允许配置
+webhook。浏览器或无头浏览器自动化不能绕过这些服务端权限。
 
 codespaces、gists、GitHub Actions workflow 管理、projects、rulesets、
 extensions、Copilot 等 GitHub 专属命令不会进入 `gd`，除非 GitCode 提供等价 API。

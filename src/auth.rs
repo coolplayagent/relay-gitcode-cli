@@ -7,6 +7,7 @@ const SERVICE_PREFIX: &str = "gd.gitcode";
 
 pub trait CredentialStore {
     fn get_token(&self, hostname: &str) -> anyhow::Result<Option<String>>;
+    fn get_stored_token(&self, hostname: &str) -> anyhow::Result<Option<String>>;
     fn set_token(&self, hostname: &str, token: &str) -> anyhow::Result<()>;
     fn delete_token(&self, hostname: &str) -> anyhow::Result<()>;
 }
@@ -43,6 +44,10 @@ impl CredentialStore for KeyringCredentialStore {
             return Ok(Some(token));
         }
 
+        self.get_stored_token(hostname)
+    }
+
+    fn get_stored_token(&self, hostname: &str) -> anyhow::Result<Option<String>> {
         let entry = match Self::entry(hostname) {
             Ok(entry) => entry,
             Err(_) => return Ok(None),
@@ -83,6 +88,10 @@ pub mod tests {
     impl CredentialStore for MemoryCredentialStore {
         fn get_token(&self, hostname: &str) -> anyhow::Result<Option<String>> {
             Ok(self.tokens.lock().unwrap().get(hostname).cloned())
+        }
+
+        fn get_stored_token(&self, hostname: &str) -> anyhow::Result<Option<String>> {
+            self.get_token(hostname)
         }
 
         fn set_token(&self, hostname: &str, token: &str) -> anyhow::Result<()> {

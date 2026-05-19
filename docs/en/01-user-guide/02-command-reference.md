@@ -45,13 +45,15 @@ gd pr comment 1 --repo owner/repo --body "please fix" --path src/main.rs --posit
 gd pr reply 1 discussion-id --repo owner/repo --body "fixed"
 ```
 
-## GitCode Pipeline Commands
+## Pipeline Commands
 
-Pipeline commands manage GitCode workflow files under `.gitcode/workflows` and
-read GitCode Actions run records and logs. They use the same GitCode personal
-access token as other commands through `GITCODE_TOKEN` or
-`gd auth login --with-token`; no AK/SK credentials are required. `gd actions`
-is available as an alias for `gd pipeline`.
+GitCode workflow commands use GitCode API credentials from `GITCODE_TOKEN` or
+the system keyring. OpenLibing gate commands use separate OpenLibing GitCode
+OAuth credentials, because GitCode pull-request gate checks are provided by
+OpenLibing. Use `gd pipeline auth login` for browser OAuth, or provide
+`GD_OPENLIBING_TOKEN` or `GD_OPENLIBING_COOKIE` in automation. The OpenLibing
+gateway defaults to `https://www.openlibing.com/gateway` and can be overridden
+with `--openlibing-base` or `GD_OPENLIBING_BASE`.
 
 ```bash
 gd pipeline set --repo owner/repo .gitcode/workflows/ci.yml --file workflow.yml
@@ -65,6 +67,16 @@ gd pipeline log --repo owner/repo workflow-run-id job-id
 gd pipeline stop --repo owner/repo workflow-run-id
 gd pipeline retry --repo owner/repo workflow-run-id --job-run-id job-id
 gd pipeline rerun --repo owner/repo workflow-run-id
+
+gd pipeline auth login
+gd pipeline auth status
+gd pipeline auth logout
+gd pipeline config --project-id openlibing-project-id
+gd pipeline setup --project-id openlibing-project-id --repo owner/repo --language Rust --codecheck-rule-set default
+gd pipeline prs --project-id openlibing-project-id --repo owner/repo --state open
+gd pipeline checks --project-id openlibing-project-id --repo owner/repo --pr 1
+gd pipeline gate-view --project-id openlibing-project-id --repo owner/repo --pr 1
+gd pipeline gate-runs --project-id openlibing-project-id --pipeline-name codecheck
 ```
 
 `gd pipeline set` writes workflow YAML through the GitCode repository contents
@@ -72,9 +84,29 @@ API. `gd pipeline codecheck` writes `.gitcode/workflows/codecheck.yml` with
 `codecheck-action@0.0.3` and references the configured secret name instead of
 embedding a personal access token. The generated CodeCheck action checks the
 source repository and branch for pull request events, and the configured
-repository URL plus current ref for push events.
-`gd pipeline log` prints raw log text by default; add `--json` to keep the full
-response envelope.
+repository URL plus current ref for push events. `gd pipeline log` prints raw
+log text by default; add `--json` to keep the full response envelope.
+
+For OpenLibing commands, `--project-id` is the OpenLibing project ID. `gd
+pipeline setup` records or updates the GitCode repository in OpenLibing,
+enables PR takeover and automatic gate triggering, applies the requested
+CodeCheck rule set, and asks OpenLibing to configure the webhook. If OpenLibing
+needs a repository robot token, pass `--public-token-env GITCODE_TOKEN` or
+another environment variable name; the token is never printed. `--repo
+owner/repo` is optional for some queries, but recommended for PR check lookups
+because OpenLibing's GitCode PR endpoints accept owner and repository filters.
+If the OpenLibing CICD PR check endpoint is not readable, `gd pipeline checks`
+falls back to the CodeCheck task summary for the same repository and PR.
+`--codecheck-rule-set` may be either a rule-set name or a direct rule-set ID; a
+direct ID can be used when the rule-set list is not readable.
+
+OpenLibing enforces repository setup permissions server-side. The correct setup
+path from the help center is: a project administrator or equivalent project
+approver records the GitCode repository in Code Repository Management, enables
+PR takeover, selects the CodeCheck language and rule set, ensures the GitCode
+public or robot account can access the repository, and configures the webhook.
+Headless browser automation still uses the same account and cannot bypass a
+`403 Forbidden` response from these management endpoints.
 
 ## Other GitCode Resources
 
@@ -107,7 +139,7 @@ current binary.
 The repository ships `skills/relay-gitcode-cli`, a ClawHub-compatible skill for
 LLM agents that should operate GitCode by invoking the local `gd` CLI and
 parsing JSON output. It covers authentication checks, repository workflows,
-issues, pull requests, search, SSH keys, labels, releases, GitCode Pipeline
+issues, pull requests, search, SSH keys, labels, releases, OpenLibing pipeline
 operations, raw `gd api` calls, and shell completion.
 
 The skill intentionally stays within GitCode-backed `gd` behavior. It does not

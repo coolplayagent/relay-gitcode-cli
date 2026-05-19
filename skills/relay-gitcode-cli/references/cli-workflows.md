@@ -182,40 +182,12 @@ Field modes:
 
 ## GitCode Pipeline Workflows
 
-Pipeline commands reuse the same GitCode personal access token as other
-commands. Provide it through `GITCODE_TOKEN` for automation or
-`gd auth login --with-token` for keyring-backed sessions; `gd` sends
-`Authorization: Bearer <token>` to both GitCode API v5 and GitCode Actions
-endpoints. Do not configure AK/SK, HuaweiCloud SDK signing variables, or a
-separate pipeline tenant/domain credential flow.
+GitCode workflow commands operate against GitCode and reuse the normal `gd`
+authentication path. Create or update workflow YAML and CodeCheck workflow files
+through the repository contents API:
 
 ```bash
-GITCODE_TOKEN="$GITCODE_TOKEN" gd pipeline list --repo owner/repo --json
-```
-
-Register or update a workflow file:
-
-```bash
-gd pipeline set \
-  --repo owner/repo \
-  .gitcode/workflows/ci.yml \
-  --file workflow.yml \
-  --json
-
-gd pipeline set \
-  --repo owner/repo \
-  .gitcode/workflows/ci.yml \
-  --mode update \
-  --sha file-sha \
-  --file workflow.yml \
-  --json
-```
-
-Create a GitCode CodeCheck workflow. Configure the named project secret in
-GitCode first; the generated workflow references the secret expression and does
-not commit a token value:
-
-```bash
+gd pipeline set --repo owner/repo .gitcode/workflows/ci.yml --file workflow.yml --json
 gd pipeline codecheck \
   --repo owner/repo \
   --language SHELL \
@@ -223,22 +195,18 @@ gd pipeline codecheck \
   --json
 ```
 
-The generated workflow filters push and pull request events by the configured
-target branch, then passes the pull request source repository and branch or the
-current push repository/ref to `codecheck-action@0.0.3`.
+The generated CodeCheck workflow references the configured secret expression and
+does not commit a token value. It filters push and pull request events by the
+configured target branch, then passes the pull request source repository and
+branch or the current push repository/ref to `codecheck-action@0.0.3`.
 
-Run and inspect pipelines:
+Run, inspect, and control GitCode workflow runs:
 
 ```bash
 gd pipeline run --repo owner/repo workflow-id --file-path .gitcode/workflows/ci.yml --branch main --json
 gd pipeline runs --repo owner/repo --workflow-name ci --status success --limit 20 --json
 gd pipeline view --repo owner/repo workflow-run-id --json
 gd pipeline log --repo owner/repo workflow-run-id job-id
-```
-
-Control a run:
-
-```bash
 gd pipeline stop --repo owner/repo workflow-run-id --json
 gd pipeline retry --repo owner/repo workflow-run-id --job-run-id job-run-id --json
 gd pipeline rerun --repo owner/repo workflow-run-id --json
@@ -246,6 +214,35 @@ gd pipeline rerun --repo owner/repo workflow-run-id --json
 
 `gd pipeline log` prints raw log text by default. Add `--json` when callers need
 the full response envelope.
+
+OpenLibing provides GitCode PR gate and CodeCheck status. Authenticate
+separately from `GITCODE_TOKEN`:
+
+```bash
+gd pipeline auth login
+gd pipeline auth status --json
+```
+
+For automation, provide `GD_OPENLIBING_TOKEN` or `GD_OPENLIBING_COOKIE`.
+OpenLibing commands require the OpenLibing project id:
+
+```bash
+gd pipeline config --project-id openlibing-project-id --json
+gd pipeline setup --project-id openlibing-project-id --repo owner/repo --language Rust --codecheck-rule-set default --json
+gd pipeline prs --project-id openlibing-project-id --repo owner/repo --state open --json
+gd pipeline checks --project-id openlibing-project-id --repo owner/repo --pr 1 --json
+gd pipeline gate-view --project-id openlibing-project-id --repo owner/repo --pr 1 --json
+gd pipeline gate-runs --project-id openlibing-project-id --pipeline-name codecheck --limit 20 --json
+```
+
+`gd pipeline checks` falls back to the OpenLibing CodeCheck task summary when
+the CICD PR check endpoint is not readable. `gd pipeline setup
+--codecheck-rule-set` accepts either a rule-set name or a direct rule-set ID.
+For setup failures on OpenLibing repository add/update, check the documented
+OpenLibing prerequisites before retrying: project administrator or equivalent
+project approver role, repository recorded in Code Repository Management, PR
+takeover enabled, CodeCheck language/rule set selected, GitCode public or robot
+account repository access, and webhook configuration permission.
 
 ## Workflow YAML References
 

@@ -23,6 +23,10 @@ gd repo view owner/repo --json
 When no environment token is present, `gd auth login --with-token` stores the
 token in the system keyring.
 
+OpenLibing-backed pipeline gate checks use separate credentials. Use
+`gd pipeline auth login` for browser OAuth, or set `GD_OPENLIBING_TOKEN` or
+`GD_OPENLIBING_COOKIE` for automation.
+
 Each GitHub Release also includes
 `relay-gitcode-cli-skill-<tag>.tar.gz`, a text-only ClawHub-compatible skill
 that teaches LLM agents to use the local `gd` CLI for GitCode API v5 workflows.
@@ -73,7 +77,16 @@ gd pipeline codecheck --repo owner/repo --language SHELL --access-token-secret C
 gd pipeline list --repo owner/repo
 gd pipeline run --repo owner/repo workflow-id --file-path .gitcode/workflows/ci.yml --branch main
 gd pipeline runs --repo owner/repo --workflow-name ci
+gd pipeline view --repo owner/repo workflow-run-id
 gd pipeline log --repo owner/repo workflow-run-id job-id
+gd pipeline auth login
+gd pipeline auth status
+gd pipeline config --project-id openlibing-project-id
+gd pipeline setup --project-id openlibing-project-id --repo owner/repo --language Rust --codecheck-rule-set default
+gd pipeline prs --project-id openlibing-project-id --repo owner/repo
+gd pipeline checks --project-id openlibing-project-id --repo owner/repo --pr 1
+gd pipeline gate-view --project-id openlibing-project-id --repo owner/repo --pr 1
+gd pipeline gate-runs --project-id openlibing-project-id --pipeline-name codecheck
 
 gd search repos query
 gd search issues query
@@ -84,6 +97,17 @@ gd release list --repo owner/repo
 gd version check
 gd completion bash
 ```
+
+`gd pipeline checks` falls back to the OpenLibing CodeCheck task summary when
+the CICD PR check endpoint is not readable. `gd pipeline setup
+--codecheck-rule-set` accepts either a rule-set name or a direct rule-set ID.
+The OpenLibing help workflow requires the repository to be maintained in
+OpenLibing by a project administrator or equivalent project approver first:
+record the GitCode repository in Code Repository Management, enable PR
+takeover, select the CodeCheck language and rule set, make sure the GitCode
+public or robot account can access the repository, and allow webhook
+configuration. Browser or headless-browser automation cannot bypass these
+server-side permissions.
 
 GitHub-only gh commands such as codespaces, gists, GitHub Actions workflow
 management, projects, rulesets, extensions, and Copilot are intentionally not

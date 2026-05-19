@@ -110,10 +110,11 @@ gd api /repos/owner/repo/issues --paginate --json
 
 ## Pipelines
 
-Pipeline commands call GitCode Actions APIs. They reuse the same GitCode
-personal access token as other `gd` commands through `GITCODE_TOKEN` or
-`gd auth login --with-token`, sending it as `Authorization: Bearer <token>`.
-Do not configure or ask for AK/SK credentials for pipeline workflows.
+GitCode workflow commands use GitCode API credentials. OpenLibing gate commands
+use separate OpenLibing GitCode OAuth credentials; they do not reuse
+`GITCODE_TOKEN`. Use `gd pipeline auth login` for browser OAuth, or set
+`GD_OPENLIBING_TOKEN` or `GD_OPENLIBING_COOKIE` for automation. Use the
+OpenLibing `--project-id`, not the GitCode repository id.
 
 ```bash
 gd pipeline set --repo owner/repo .gitcode/workflows/ci.yml --file workflow.yml --json
@@ -124,7 +125,25 @@ gd pipeline view --repo owner/repo workflow-run-id --json
 gd pipeline log --repo owner/repo workflow-run-id job-id
 gd pipeline stop --repo owner/repo workflow-run-id --json
 gd pipeline retry --repo owner/repo workflow-run-id --json
+gd pipeline rerun --repo owner/repo workflow-run-id --json
+
+gd pipeline auth status --json
+gd pipeline config --project-id openlibing-project-id --json
+gd pipeline setup --project-id openlibing-project-id --repo owner/repo --language Rust --codecheck-rule-set default --json
+gd pipeline prs --project-id openlibing-project-id --repo owner/repo --state open --json
+gd pipeline checks --project-id openlibing-project-id --repo owner/repo --pr 1 --json
+gd pipeline gate-view --project-id openlibing-project-id --repo owner/repo --pr 1 --json
+gd pipeline gate-runs --project-id openlibing-project-id --pipeline-name codecheck --json
 ```
+
+`gd pipeline checks` falls back to the OpenLibing CodeCheck task summary when
+the CICD PR check endpoint is not readable. `gd pipeline setup
+--codecheck-rule-set` accepts either a rule-set name or a direct rule-set ID.
+For setup failures on OpenLibing repository add/update, check the documented
+OpenLibing prerequisites before retrying: project administrator or equivalent
+project approver role, repository recorded in Code Repository Management, PR
+takeover enabled, CodeCheck language/rule set selected, GitCode public or robot
+account repository access, and webhook configuration permission.
 
 ## Troubleshooting
 

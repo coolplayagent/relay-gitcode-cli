@@ -8,8 +8,8 @@
   pagination, JSON decoding, and API error mapping.
 - `src/http.rs` owns the shared reqwest client policy for async transport,
   proxy reuse, and TLS verification defaults.
-- `src/pipeline.rs` owns GitCode Actions endpoint construction, request body
-  shaping, workflow file helpers, and pipeline API error mapping.
+- `src/pipeline.rs` owns OpenLibing gateway endpoint construction, OAuth
+  callback parsing, request authentication, and pipeline gate API error mapping.
 - `src/auth.rs` handles environment and keyring token lookup.
 - `src/config.rs` owns non-secret host and API base configuration.
 
@@ -25,10 +25,20 @@ Authorization: Bearer <token>
 This matches the GitCode API v5 documentation and avoids putting tokens in query
 strings by default.
 
-Pipeline commands use the same Bearer token flow. Workflow file creation and
-updates go through the GitCode API v5 repository contents endpoints. Workflow
-run listing, manual dispatch, run details, log reads, stop, retry, and rerun use
-the GitCode Actions endpoints under the configured hostname.
+Pipeline gate commands use OpenLibing credentials, not `GITCODE_TOKEN`.
+`GD_OPENLIBING_TOKEN`, `GD_OPENLIBING_COOKIE`, and `GD_OPENLIBING_CSRF_TOKEN`
+are checked first. Otherwise `gd pipeline auth login` stores the OpenLibing
+credential material in a separate keyring entry. OpenLibing requests send
+available bearer, cookie, and CSRF headers to the configured gateway.
+Repository gate setup is also OpenLibing-scoped: `gd pipeline setup` sends the
+GitCode repository URL, PR takeover flags, automatic gate-trigger flags,
+CodeCheck rule-set selection, and optional public-account token material to
+OpenLibing. Any token read from `--public-token-env` is sent only in the
+OpenLibing request body and is redacted from command output.
+OpenLibing still authorizes repository maintenance on the server. A `403`
+during repository add/update means the account needs project-administrator or
+equivalent project-approver permission, and browser automation cannot change
+that authorization result.
 
 ## Runtime and Network Policy
 
