@@ -9,6 +9,7 @@
 - [Search, SSH Keys, Labels, and Releases](#search-ssh-keys-labels-and-releases)
 - [Raw GitCode API Calls](#raw-gitcode-api-calls)
 - [GitCode Pipeline Workflows](#gitcode-pipeline-workflows)
+- [Workflow YAML References](#workflow-yaml-references)
 - [Out of Scope](#out-of-scope)
 
 ## Installation and Authentication
@@ -221,6 +222,12 @@ gd pipeline rerun --repo owner/repo workflow-run-id --json
 
 `gd pipeline log` prints raw log text by default. Add `--json` when callers need
 the full response envelope.
+
+## Workflow YAML References
+
+For examples of `.gitcode/workflows/ci.yml` structure, event triggers, runners,
+checkout steps, and language-specific CI templates, read
+`references/gitcode-workflow-yml.md`.
 
 ## Out of Scope
 
