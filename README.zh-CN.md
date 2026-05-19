@@ -2,13 +2,12 @@
 
 # relay-gitcode-cli
 
-`relay-gitcode-cli` provides `gd`, a Rust command line client for GitCode. It
-uses gh-style command names where GitCode has equivalent API behavior and keeps
-GitCode-specific behavior explicit.
+`relay-gitcode-cli` 提供 `gd`，一个面向 GitCode 的 Rust 命令行工具。它在
+GitCode API 具备等价能力的地方采用 gh 风格命令命名，并保持 GitCode 特有行为清晰可见。
 
-GitCode API documentation: https://docs.gitcode.com/docs/apis/
+GitCode API 文档：https://docs.gitcode.com/docs/apis/
 
-## Quick Start
+## 快速开始
 
 ```bash
 cargo build
@@ -18,11 +17,10 @@ target/debug/gd auth status
 target/debug/gd repo view owner/repo --json
 ```
 
-`GITCODE_TOKEN` is also accepted directly for CI and temporary end-to-end tests.
-When no environment token is present, `gd auth login --with-token` stores the
-token in the system keyring.
+`GITCODE_TOKEN` 可用于 CI 和临时端到端测试。没有环境变量 token 时，
+`gd auth login --with-token` 会把 token 保存到系统 keyring。
 
-## Commands
+## 命令
 
 ```bash
 gd auth login --with-token
@@ -55,24 +53,23 @@ gd release list --repo owner/repo
 gd completion bash
 ```
 
-GitHub-only gh commands such as codespaces, gists, GitHub Actions workflow
-management, projects, rulesets, extensions, and Copilot are intentionally not
-part of `gd` unless GitCode exposes equivalent API behavior.
+codespaces、gists、GitHub Actions workflow 管理、projects、rulesets、
+extensions、Copilot 等 GitHub 专属命令不会进入 `gd`，除非 GitCode 提供等价 API。
 
-## Documentation
+## 文档
 
-- [Documentation Bookshelf](docs/README.md)
-- [English Documentation](docs/en/README.md)
-- [Chinese Documentation](docs/zh/README.md)
+- [文档书架](docs/README.md)
+- [英文文档](docs/en/README.md)
+- [中文文档](docs/zh/README.md)
 
-## Development
+## 开发
 
 ```bash
 ./build.sh --debug
 ./check.sh
 ```
 
-The local quality gates are:
+本地质量门禁：
 
 ```bash
 cargo fmt --all -- --check
@@ -83,9 +80,8 @@ cargo build --all-targets --all-features
 
 ## CI
 
-- GitHub Actions: `.github/workflows/pr-checks.yml`,
-  `.github/workflows/code_quality.yml`, and `.github/workflows/release.yml`.
-- GitCode Pipeline: `.gitcode/workflows/pr-checks.yml`.
+- GitHub Actions：`.github/workflows/pr-checks.yml`、
+  `.github/workflows/code_quality.yml` 和 `.github/workflows/release.yml`。
+- GitCode 流水线：`.gitcode/workflows/pr-checks.yml`。
 
-Repository protection and secret setup are documented in
-`docs/repository-settings.md`.
+仓库保护和 secret 配置见 `docs/repository-settings.md`。
