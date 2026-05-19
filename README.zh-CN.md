@@ -61,7 +61,7 @@ gd issue comment 1 --repo owner/repo --body "thanks"
 gd pr list --repo owner/repo
 gd pr view 1 --repo owner/repo
 gd pr create --repo owner/repo --title "change" --body "details" --base main --head feature
-gd pr comments 1 --repo owner/repo
+gd pr comments 1 --repo owner/repo --limit 50
 gd pr comment 1 --repo owner/repo --body "please fix" --path src/main.rs --position 3
 gd pr reply 1 discussion-id --repo owner/repo --body "fixed"
 

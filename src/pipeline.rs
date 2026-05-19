@@ -273,10 +273,11 @@ pub fn codecheck_workflow_content(request: CodecheckWorkflowRequest) -> anyhow::
     let rule_sets = serde_json::to_string(&rule_sets)?;
     let access_token = format!("${{{{ secrets.{} }}}}", request.access_token_secret);
     let name = yaml_quote(&request.name);
-    let branch = yaml_quote(&request.branch);
+    let trigger_branch = yaml_quote(&request.branch);
     let repo_url = yaml_quote(&request.repo_url);
     let rule_sets = yaml_quote(&rule_sets);
     let access_token = yaml_quote(&access_token);
+    let codecheck_branch = "${{ github.head_ref || github.ref_name }}";
 
     Ok(format!(
         "\
@@ -284,9 +285,9 @@ name: {name}
 
 on:
   push:
-    branches: [ {branch} ]
+    branches: [ {trigger_branch} ]
   pull_request:
-    branches: [ {branch} ]
+    branches: [ {trigger_branch} ]
 
 jobs:
   build:
@@ -296,7 +297,7 @@ jobs:
         uses: codecheck-action@0.0.3
         with:
           repo_url: {repo_url}
-          branch: {branch}
+          branch: {codecheck_branch}
           rule_sets: {rule_sets}
           access_token: {access_token}
 "
@@ -595,6 +596,8 @@ mod tests {
         assert!(
             content.contains("rule_sets: '[{\"language\":\"SHELL\"},{\"language\":\"RUST\"}]'")
         );
+        assert!(content.contains("branches: [ 'main' ]"));
+        assert!(content.contains("branch: ${{ github.head_ref || github.ref_name }}"));
         assert!(content.contains("access_token: '${{ secrets.CODECHECK_TOKEN }}'"));
         assert!(!content.contains("integration-token"));
     }

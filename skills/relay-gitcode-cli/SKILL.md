@@ -94,7 +94,7 @@ gd issue comment 1 --repo owner/repo --body "thanks" --json
 gd pr list --repo owner/repo --state open --base main --json
 gd pr view 1 --repo owner/repo --json
 gd pr create --repo owner/repo --title "change" --body "details" --base main --head feature --json
-gd pr comments 1 --repo owner/repo --json
+gd pr comments 1 --repo owner/repo --limit 50 --json
 gd pr comment 1 --repo owner/repo --body "please fix" --path src/main.rs --position 3 --need-to-resolve --json
 gd pr reply 1 discussion-id --repo owner/repo --body "fixed" --json
 ```

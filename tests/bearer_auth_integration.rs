@@ -206,8 +206,12 @@ fn gd_pipeline_list_reuses_gitcode_bearer_token() {
 
 #[test]
 fn gd_pr_comment_and_reply_use_gitcode_bearer_token() {
-    let server = MockServer::spawn(2, |request| {
+    let server = MockServer::spawn(3, |request| {
         match (request.method(), request.path_without_query()) {
+            ("GET", "/api/v5/repos/owner/repo/pulls/7/comments") => MockResponse {
+                status: 200,
+                body: r#"[{"id":"discussion-1","body":"please fix"}]"#,
+            },
             ("POST", "/api/v5/repos/owner/repo/pulls/7/comments") => MockResponse {
                 status: 200,
                 body: r#"{"id":"discussion-1","body":"please fix"}"#,
@@ -226,6 +230,27 @@ fn gd_pr_comment_and_reply_use_gitcode_bearer_token() {
     });
     let config_dir = tempfile::tempdir().expect("create temporary config dir");
     let api_base = format!("{}/api/v5", server.base_url());
+
+    let mut comments_command = gd_command();
+    let comments_output = comments_command
+        .env("GITCODE_TOKEN", "integration-token")
+        .env("GD_CONFIG_PATH", config_dir.path().join("config.json"))
+        .arg("--api-base")
+        .arg(&api_base)
+        .args([
+            "pr",
+            "comments",
+            "7",
+            "--repo",
+            "owner/repo",
+            "--page",
+            "2",
+            "--limit",
+            "40",
+            "--json",
+        ])
+        .output()
+        .expect("run gd pr comments");
 
     let mut comment_command = gd_command();
     let comment_output = comment_command
@@ -272,14 +297,20 @@ fn gd_pr_comment_and_reply_use_gitcode_bearer_token() {
         .expect("run gd pr reply");
 
     let requests = server.finish();
+    assert_command_success(&comments_output, &requests);
     assert_command_success(&comment_output, &requests);
     assert_command_success(&reply_output, &requests);
-    assert_eq!(requests.len(), 2);
+    assert_eq!(requests.len(), 3);
     assert!(
         requests
             .iter()
             .all(|request| request.header("authorization") == Some("Bearer integration-token"))
     );
+    assert!(requests.iter().any(|request| {
+        request.path_without_query() == "/api/v5/repos/owner/repo/pulls/7/comments"
+            && request.path().contains("page=2")
+            && request.path().contains("per_page=40")
+    }));
     assert!(requests.iter().any(|request| {
         request.path_without_query() == "/api/v5/repos/owner/repo/pulls/7/comments"
             && request.body.contains(r#""body":"please fix""#)
@@ -353,6 +384,7 @@ fn gd_pipeline_codecheck_creates_workflow_without_leaking_token() {
     let content = String::from_utf8(STANDARD.decode(content).expect("decode workflow content"))
         .expect("workflow content is utf-8");
     assert!(content.contains("uses: codecheck-action@0.0.3"));
+    assert!(content.contains("branch: ${{ github.head_ref || github.ref_name }}"));
     assert!(content.contains("access_token: '${{ secrets.CODECHECK_TOKEN }}'"));
     assert!(!content.contains("integration-token"));
 }

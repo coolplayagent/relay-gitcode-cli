@@ -38,7 +38,7 @@ gd issue comment 1 --repo owner/repo --body "thanks"
 gd pr list --repo owner/repo
 gd pr view 1 --repo owner/repo
 gd pr create --repo owner/repo --title "change" --body "details" --base main --head feature
-gd pr comments 1 --repo owner/repo
+gd pr comments 1 --repo owner/repo --limit 50
 gd pr comment 1 --repo owner/repo --body "please fix" --path src/main.rs --position 3 --need-to-resolve
 gd pr reply 1 discussion-id --repo owner/repo --body "fixed"
 ```
@@ -67,7 +67,9 @@ gd pipeline rerun --repo owner/repo workflow-run-id
 `gd pipeline set` 通过 GitCode 仓库 contents API 写入 workflow YAML。
 `gd pipeline codecheck` 会写入 `.gitcode/workflows/codecheck.yml`，使用
 `codecheck-action@0.0.3`，并引用配置的 secret 名称而不是把个人访问 token
-写进仓库。`gd pipeline log` 默认输出原始日志文本；添加 `--json` 可保留完整响应结构。
+写进仓库。生成的 CodeCheck action 会在 pull request 事件中检查源分支，在
+push 事件中检查当前 ref。`gd pipeline log` 默认输出原始日志文本；添加
+`--json` 可保留完整响应结构。
 
 ## 其他 GitCode 资源
 

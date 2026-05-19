@@ -29,7 +29,8 @@ same core gates as GitHub Actions inside `repo_workspace`.
 
 For CodeCheck workflows, create a GitCode project secret such as
 `CODECHECK_ACCESS_TOKEN`, then generate the workflow without committing the
-token value:
+token value. Pull request runs check the source branch, while push runs check
+the current ref:
 
 ```bash
 gd pipeline codecheck --repo owner/repo --language SHELL --access-token-secret CODECHECK_ACCESS_TOKEN

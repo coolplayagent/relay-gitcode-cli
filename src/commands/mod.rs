@@ -370,7 +370,10 @@ async fn pr_command(
             let value = client
                 .get(
                     &format!("repos/{repository}/pulls/{}/comments", args.number),
-                    &[],
+                    &[
+                        ("page", args.page.to_string()),
+                        ("per_page", args.limit.to_string()),
+                    ],
                 )
                 .await?;
             print_value(json_output, &value)

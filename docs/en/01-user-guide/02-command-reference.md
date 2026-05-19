@@ -40,7 +40,7 @@ gd issue comment 1 --repo owner/repo --body "thanks"
 gd pr list --repo owner/repo
 gd pr view 1 --repo owner/repo
 gd pr create --repo owner/repo --title "change" --body "details" --base main --head feature
-gd pr comments 1 --repo owner/repo
+gd pr comments 1 --repo owner/repo --limit 50
 gd pr comment 1 --repo owner/repo --body "please fix" --path src/main.rs --position 3 --need-to-resolve
 gd pr reply 1 discussion-id --repo owner/repo --body "fixed"
 ```
@@ -70,8 +70,10 @@ gd pipeline rerun --repo owner/repo workflow-run-id
 `gd pipeline set` writes workflow YAML through the GitCode repository contents
 API. `gd pipeline codecheck` writes `.gitcode/workflows/codecheck.yml` with
 `codecheck-action@0.0.3` and references the configured secret name instead of
-embedding a personal access token. `gd pipeline log` prints raw log text by
-default; add `--json` to keep the full response envelope.
+embedding a personal access token. The generated CodeCheck action checks the
+source branch for pull request events and the current ref for push events.
+`gd pipeline log` prints raw log text by default; add `--json` to keep the full
+response envelope.
 
 ## Other GitCode Resources
 

@@ -666,6 +666,10 @@ pub struct PrCommentsArgs {
     pub number: u64,
     #[arg(short = 'R', long = "repo")]
     pub repository: Option<String>,
+    #[arg(long, default_value_t = 1)]
+    pub page: u64,
+    #[arg(short = 'L', long = "limit", default_value_t = 30)]
+    pub limit: u64,
 }
 
 #[derive(Debug, Args)]
@@ -1142,12 +1146,25 @@ mod tests {
 
     #[test]
     fn parses_pr_comments_comment_and_reply() {
-        let comments =
-            Cli::try_parse_from(["gd", "pr", "comments", "7", "--repo", "owner/repo"]).unwrap();
+        let comments = Cli::try_parse_from([
+            "gd",
+            "pr",
+            "comments",
+            "7",
+            "--repo",
+            "owner/repo",
+            "--page",
+            "2",
+            "--limit",
+            "40",
+        ])
+        .unwrap();
         match comments.command {
             Command::Pr(PrCommand::Comments(args)) => {
                 assert_eq!(args.number, 7);
                 assert_eq!(args.repository.as_deref(), Some("owner/repo"));
+                assert_eq!(args.page, 2);
+                assert_eq!(args.limit, 40);
             }
             other => panic!("unexpected command: {other:?}"),
         }
