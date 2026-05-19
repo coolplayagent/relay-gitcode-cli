@@ -16,6 +16,7 @@ jobs:
   qodana:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     permissions:
       contents: write
       pull-requests: write
@@ -30,6 +31,8 @@ jobs:
       - name: Qodana scan
         uses: JetBrains/qodana-action@v2026.1
         with:
-          args: --linter qodana-rust
+          args: |
+            --linter qodana-rust
+            --property qd.rust.configuration.timeout.minutes=25
         env:
           QODANA_TOKEN: ${{ secrets.QODANA_TOKEN }}
