@@ -3,6 +3,7 @@ mod cli;
 mod client;
 mod commands;
 mod config;
+mod http;
 mod output;
 mod pipeline;
 mod repo;
@@ -39,7 +40,7 @@ async fn run() -> anyhow::Result<()> {
             std::process::exit(error.exit_code());
         }
     };
-    let mut config = Config::load().context("failed to load gd config")?;
+    let mut config = Config::load().await.context("failed to load gd config")?;
     config.apply_overrides(
         Some(cli.global.hostname.as_str()),
         Some(cli.global.api_base.as_str()),

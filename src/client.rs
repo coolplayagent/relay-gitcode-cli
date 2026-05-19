@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fs, path::Path};
+use std::{collections::BTreeMap, path::Path};
 
 use anyhow::{Context, bail};
 use reqwest::{
@@ -7,6 +7,7 @@ use reqwest::{
 };
 use serde::Serialize;
 use serde_json::{Map, Value, json};
+use tokio::io::AsyncReadExt;
 use url::Url;
 
 #[derive(Debug, Clone)]
@@ -35,9 +36,9 @@ pub struct ApiResponse {
 }
 
 impl GitcodeClient {
-    pub fn new(api_base: Url, token: Option<String>) -> Self {
+    pub fn with_http_client(http: reqwest::Client, api_base: Url, token: Option<String>) -> Self {
         Self {
-            http: reqwest::Client::new(),
+            http,
             api_base,
             token,
         }
@@ -87,7 +88,8 @@ impl GitcodeClient {
             &request.raw_fields,
             &request.fields,
             request.input.as_deref(),
-        )?;
+        )
+        .await?;
         loop {
             let mut builder = self.http.request(method.clone(), url.clone());
             builder = self.apply_auth(builder);
@@ -197,18 +199,13 @@ fn parse_headers(headers: &[String]) -> anyhow::Result<HeaderMap> {
     Ok(output)
 }
 
-fn api_body(
+async fn api_body(
     raw_fields: &[String],
     typed_fields: &[String],
     input: Option<&Path>,
 ) -> anyhow::Result<Option<Value>> {
     if let Some(path) = input {
-        let content = if path == Path::new("-") {
-            std::io::read_to_string(std::io::stdin())?
-        } else {
-            fs::read_to_string(path)
-                .with_context(|| format!("failed to read {}", path.display()))?
-        };
+        let content = read_text_input(path).await?;
         if content.trim().is_empty() {
             return Ok(Some(Value::Null));
         }
@@ -231,6 +228,21 @@ fn api_body(
         object.insert(key.to_string(), parse_typed_value(value));
     }
     Ok(Some(Value::Object(object)))
+}
+
+async fn read_text_input(path: &Path) -> anyhow::Result<String> {
+    if path == Path::new("-") {
+        let mut content = String::new();
+        tokio::io::stdin()
+            .read_to_string(&mut content)
+            .await
+            .context("failed to read request body from stdin")?;
+        return Ok(content);
+    }
+
+    tokio::fs::read_to_string(path)
+        .await
+        .with_context(|| format!("failed to read {}", path.display()))
 }
 
 fn split_field(field: &str) -> anyhow::Result<(&str, &str)> {
@@ -337,8 +349,11 @@ mod tests {
 
     #[test]
     fn endpoint_is_joined_under_api_base() {
-        let client =
-            GitcodeClient::new(Url::parse("https://api.gitcode.com/api/v5/").unwrap(), None);
+        let client = GitcodeClient::with_http_client(
+            crate::http::gitcode_http_client().unwrap(),
+            Url::parse("https://api.gitcode.com/api/v5/").unwrap(),
+            None,
+        );
         assert_eq!(
             client.endpoint_url("/repos/a/b").unwrap().as_str(),
             "https://api.gitcode.com/api/v5/repos/a/b"

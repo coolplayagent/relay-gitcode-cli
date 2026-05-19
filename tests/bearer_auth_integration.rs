@@ -125,7 +125,8 @@ fn gd_api_uses_bearer_token_from_gitcode_token() {
     let config_dir = tempfile::tempdir().expect("create temporary config dir");
     let api_base = format!("{}/api/v5", server.base_url());
 
-    let output = Command::new(env!("CARGO_BIN_EXE_gd"))
+    let mut command = gd_command();
+    let output = command
         .env("GITCODE_TOKEN", "integration-token")
         .env("GD_CONFIG_PATH", config_dir.path().join("config.json"))
         .arg("--api-base")
@@ -166,7 +167,8 @@ fn gd_pipeline_list_reuses_gitcode_bearer_token() {
     let hostname = server.base_url();
     let api_base = format!("{hostname}/api/v5");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_gd"))
+    let mut command = gd_command();
+    let output = command
         .env("GITCODE_TOKEN", "integration-token")
         .env("GD_CONFIG_PATH", config_dir.path().join("config.json"))
         .arg("--hostname")
@@ -196,6 +198,105 @@ fn gd_pipeline_list_reuses_gitcode_bearer_token() {
             && request.body.contains(r#""per_page":50"#)
     }));
     assert!(!String::from_utf8_lossy(&output.stdout).contains("integration-token"));
+}
+
+#[test]
+fn gd_api_uses_http_proxy_environment() {
+    let target = MockServer::spawn(0, |_| MockResponse {
+        status: 500,
+        body: r#"{"message":"target should not receive proxied request"}"#,
+    });
+    let target_api_base = format!("{}/api/v5", target.base_url());
+    let proxy = MockServer::spawn(1, |request| {
+        if request.method() == "GET" && request.path().starts_with("http://") {
+            MockResponse {
+                status: 200,
+                body: r#"{"login":"proxied-user"}"#,
+            }
+        } else {
+            MockResponse {
+                status: 404,
+                body: r#"{"message":"unexpected proxy request"}"#,
+            }
+        }
+    });
+    let config_dir = tempfile::tempdir().expect("create temporary config dir");
+
+    let mut command = gd_command();
+    let output = command
+        .env("GITCODE_TOKEN", "integration-token")
+        .env("GD_CONFIG_PATH", config_dir.path().join("config.json"))
+        .env("http_proxy", proxy.base_url())
+        .arg("--api-base")
+        .arg(target_api_base)
+        .args(["api", "/user", "--json"])
+        .output()
+        .expect("run gd api through proxy");
+
+    let requests = proxy.finish();
+    let target_requests = target.finish();
+    assert_command_success(&output, &requests);
+    assert_eq!(requests.len(), 1);
+    assert!(requests[0].path().contains("/api/v5/user"));
+    assert!(target_requests.is_empty());
+}
+
+#[test]
+fn gd_api_respects_no_proxy_environment() {
+    let target = MockServer::spawn(1, |request| {
+        if request.method() == "GET" && request.path_without_query() == "/api/v5/user" {
+            MockResponse {
+                status: 200,
+                body: r#"{"login":"direct-user"}"#,
+            }
+        } else {
+            MockResponse {
+                status: 404,
+                body: r#"{"message":"unexpected direct request"}"#,
+            }
+        }
+    });
+    let proxy = MockServer::spawn(0, |_| MockResponse {
+        status: 500,
+        body: r#"{"message":"proxy should not receive direct request"}"#,
+    });
+    let config_dir = tempfile::tempdir().expect("create temporary config dir");
+    let api_base = format!("{}/api/v5", target.base_url());
+
+    let mut command = gd_command();
+    let output = command
+        .env("GITCODE_TOKEN", "integration-token")
+        .env("GD_CONFIG_PATH", config_dir.path().join("config.json"))
+        .env("http_proxy", proxy.base_url())
+        .env("NO_PROXY", "127.0.0.1")
+        .arg("--api-base")
+        .arg(api_base)
+        .args(["api", "/user", "--json"])
+        .output()
+        .expect("run gd api with no_proxy");
+
+    let requests = target.finish();
+    let proxy_requests = proxy.finish();
+    assert_command_success(&output, &requests);
+    assert_eq!(requests.len(), 1);
+    assert!(proxy_requests.is_empty());
+}
+
+fn gd_command() -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_gd"));
+    for key in [
+        "HTTP_PROXY",
+        "http_proxy",
+        "HTTPS_PROXY",
+        "https_proxy",
+        "ALL_PROXY",
+        "all_proxy",
+        "NO_PROXY",
+        "no_proxy",
+    ] {
+        command.env_remove(key);
+    }
+    command
 }
 
 fn read_request(stream: &mut TcpStream) -> RecordedRequest {

@@ -44,3 +44,11 @@ https://api.gitcode.com/api/v5
 ```
 
 测试兼容 host 时，可通过 `--api-base` 或 `GITCODE_API_BASE` 覆盖。
+
+## 网络
+
+`gd` 使用 reqwest 提供的系统代理行为，支持
+`HTTP_PROXY`/`http_proxy`、`HTTPS_PROXY`/`https_proxy`、
+`ALL_PROXY`/`all_proxy` 和 `NO_PROXY`/`no_proxy`。
+
+GitCode API 调用默认不校验 TLS 证书。
