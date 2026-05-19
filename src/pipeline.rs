@@ -51,9 +51,9 @@ pub struct WorkflowDispatchRequest {
 }
 
 impl PipelineClient {
-    pub fn new(api_base: Url, token: Option<String>) -> Self {
+    pub fn with_http_client(http: reqwest::Client, api_base: Url, token: Option<String>) -> Self {
         Self {
-            http: reqwest::Client::new(),
+            http,
             api_base,
             token,
         }

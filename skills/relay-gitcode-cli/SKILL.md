@@ -25,6 +25,15 @@ such as gists, codespaces, projects, GitHub Actions, rulesets, extensions, or
 Copilot unless GitCode exposes equivalent API behavior and the task can be done
 through `gd api`.
 
+When `gd` commands, flags, examples, or user-facing behavior change in this
+repository, update this `SKILL.md` in the same change so agent workflows stay
+aligned with the compiled CLI.
+
+`gd` reuses reqwest system proxy behavior for `HTTP_PROXY`/`http_proxy`,
+`HTTPS_PROXY`/`https_proxy`, `ALL_PROXY`/`all_proxy`, and
+`NO_PROXY`/`no_proxy`. TLS certificate verification is disabled by default for
+GitCode API calls.
+
 ## Readiness
 
 Check whether `gd` exists, then inspect version and authentication state:

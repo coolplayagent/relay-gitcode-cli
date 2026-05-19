@@ -1,8 +1,9 @@
-use std::{io::Read, path::Path};
+use std::path::Path;
 
 use anyhow::{Context, bail};
 use clap_complete::{Generator, Shell as CompleteShell, generate};
 use serde_json::{Value, json};
+use tokio::io::AsyncReadExt;
 
 use crate::{
     auth::CredentialStore,
@@ -35,8 +36,13 @@ pub async fn run(
         Command::Version(command) => version(command, json_output).await,
         Command::Auth(command) => auth(command, &mut config, credentials, json_output).await,
         other => {
-            let token = credentials.get_token(&config.hostname)?;
-            let client = GitcodeClient::new(config.api_base_url()?, token.clone());
+            let token = credential_get_token(credentials, &config.hostname)?;
+            let http = crate::http::gitcode_http_client()?;
+            let client = GitcodeClient::with_http_client(
+                http.clone(),
+                config.api_base_url()?,
+                token.clone(),
+            );
             match other {
                 Command::Api(args) => {
                     let responses = client
@@ -80,7 +86,7 @@ pub async fn run(
                     release_command(command, &config, &client, json_output).await
                 }
                 Command::Pipeline(command) => {
-                    pipeline_command(command, &config, &client, token, json_output).await
+                    pipeline_command(command, &config, &client, http, token, json_output).await
                 }
                 Command::Completion(_) | Command::Version(_) | Command::Auth(_) => unreachable!(),
             }
@@ -115,15 +121,16 @@ async fn auth(
                 bail!("web login is not supported yet; use gd auth login --with-token");
             }
             let mut token = String::new();
-            std::io::stdin()
+            tokio::io::stdin()
                 .read_to_string(&mut token)
+                .await
                 .context("failed to read token from stdin")?;
             let token = token.trim();
             if token.is_empty() {
                 bail!("token from stdin is empty");
             }
-            credentials.set_token(&config.hostname, token)?;
-            config.save()?;
+            credential_set_token(credentials, &config.hostname, token)?;
+            config.save().await?;
             let value = json!({
                 "hostname": config.hostname,
                 "status": "logged_in",
@@ -133,13 +140,13 @@ async fn auth(
         }
         AuthCommand::Logout(args) => {
             let hostname = args.hostname.unwrap_or_else(|| config.hostname.clone());
-            credentials.delete_token(&hostname)?;
+            credential_delete_token(credentials, &hostname)?;
             let value = json!({"hostname": hostname, "status": "logged_out"});
             print_value(json_output, &value)
         }
         AuthCommand::Status(args) => {
             let hostname = args.hostname.unwrap_or_else(|| config.hostname.clone());
-            let token = credentials.get_token(&hostname)?;
+            let token = credential_get_token(credentials, &hostname)?;
             let value = json!({
                 "hostname": hostname,
                 "logged_in": token.is_some(),
@@ -154,13 +161,35 @@ async fn auth(
         }
         AuthCommand::Token(args) => {
             let hostname = args.hostname.unwrap_or_else(|| config.hostname.clone());
-            let Some(token) = credentials.get_token(&hostname)? else {
+            let Some(token) = credential_get_token(credentials, &hostname)? else {
                 bail!("not logged in to {hostname}");
             };
             println!("{token}");
             Ok(())
         }
     }
+}
+
+fn credential_get_token(
+    credentials: &dyn CredentialStore,
+    hostname: &str,
+) -> anyhow::Result<Option<String>> {
+    tokio::task::block_in_place(|| credentials.get_token(hostname))
+}
+
+fn credential_set_token(
+    credentials: &dyn CredentialStore,
+    hostname: &str,
+    token: &str,
+) -> anyhow::Result<()> {
+    tokio::task::block_in_place(|| credentials.set_token(hostname, token))
+}
+
+fn credential_delete_token(
+    credentials: &dyn CredentialStore,
+    hostname: &str,
+) -> anyhow::Result<()> {
+    tokio::task::block_in_place(|| credentials.delete_token(hostname))
 }
 
 async fn repo_command(
@@ -172,7 +201,8 @@ async fn repo_command(
     match command {
         RepoCommand::View(args) => {
             let repository =
-                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())?;
+                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())
+                    .await?;
             let value = client.get(&format!("repos/{repository}"), &[]).await?;
             print_value(json_output, &value)
         }
@@ -193,12 +223,15 @@ async fn repo_command(
                 .await?;
             print_value(json_output, &value)
         }
-        RepoCommand::Clone(args) => repo::run_git_clone(
-            &config.hostname,
-            &args.repository,
-            args.directory,
-            &args.git_flags,
-        ),
+        RepoCommand::Clone(args) => {
+            repo::run_git_clone(
+                &config.hostname,
+                &args.repository,
+                args.directory,
+                &args.git_flags,
+            )
+            .await
+        }
         RepoCommand::Fork(args) => {
             let value = client
                 .post(&format!("repos/{}/forks", args.repository), &json!({}))
@@ -226,7 +259,8 @@ async fn issue_command(
     match command {
         IssueCommand::List(args) => {
             let repository =
-                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())?;
+                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())
+                    .await?;
             let value = client
                 .get(
                     &format!("repos/{repository}/issues"),
@@ -241,7 +275,8 @@ async fn issue_command(
         }
         IssueCommand::View(args) => {
             let repository =
-                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())?;
+                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())
+                    .await?;
             let value = client
                 .get(&format!("repos/{repository}/issues/{}", args.number), &[])
                 .await?;
@@ -249,7 +284,8 @@ async fn issue_command(
         }
         IssueCommand::Create(args) => {
             let repository =
-                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())?;
+                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())
+                    .await?;
             let (owner, repo_name) = repo::split_repo(&repository)?;
             let body = form_body([
                 ("repo", Some(repo_name.to_string())),
@@ -263,7 +299,8 @@ async fn issue_command(
         }
         IssueCommand::Comment(args) => {
             let repository =
-                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())?;
+                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())
+                    .await?;
             let body = json!({ "body": args.body });
             let value = client
                 .post(
@@ -285,7 +322,8 @@ async fn pr_command(
     match command {
         PrCommand::List(args) => {
             let repository =
-                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())?;
+                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())
+                    .await?;
             let value = client
                 .get(
                     &format!("repos/{repository}/pulls"),
@@ -301,7 +339,8 @@ async fn pr_command(
         }
         PrCommand::View(args) => {
             let repository =
-                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())?;
+                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())
+                    .await?;
             let value = client
                 .get(&format!("repos/{repository}/pulls/{}", args.number), &[])
                 .await?;
@@ -309,7 +348,8 @@ async fn pr_command(
         }
         PrCommand::Create(args) => {
             let repository =
-                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())?;
+                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())
+                    .await?;
             let body = form_body([
                 ("title", Some(args.title)),
                 ("body", args.body),
@@ -360,7 +400,8 @@ async fn ssh_key_command(
             print_value(json_output, &value)
         }
         SshKeyCommand::Add(args) => {
-            let key = std::fs::read_to_string(&args.key_file)
+            let key = tokio::fs::read_to_string(&args.key_file)
+                .await
                 .with_context(|| format!("failed to read {}", args.key_file.display()))?;
             let body = form_body([("key", Some(key)), ("title", args.title)]);
             let value = client.post("user/keys", &body).await?;
@@ -382,7 +423,8 @@ async fn label_command(
     match command {
         LabelCommand::List(args) => {
             let repository =
-                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())?;
+                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())
+                    .await?;
             let value = client
                 .get(
                     &format!("repos/{repository}/labels"),
@@ -396,7 +438,8 @@ async fn label_command(
         }
         LabelCommand::Create(args) => {
             let repository =
-                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())?;
+                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())
+                    .await?;
             let body = form_body([
                 ("name", Some(args.name)),
                 ("color", args.color),
@@ -409,7 +452,8 @@ async fn label_command(
         }
         LabelCommand::Edit(args) => {
             let repository =
-                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())?;
+                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())
+                    .await?;
             let body = form_body([
                 ("name", args.new_name),
                 ("color", args.color),
@@ -422,7 +466,8 @@ async fn label_command(
         }
         LabelCommand::Delete(args) => {
             let repository =
-                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())?;
+                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())
+                    .await?;
             let value = client
                 .delete(&format!("repos/{repository}/labels/{}", args.name))
                 .await?;
@@ -440,7 +485,8 @@ async fn release_command(
     match command {
         ReleaseCommand::List(args) => {
             let repository =
-                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())?;
+                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())
+                    .await?;
             let value = client
                 .get(
                     &format!("repos/{repository}/releases"),
@@ -454,7 +500,8 @@ async fn release_command(
         }
         ReleaseCommand::View(args) => {
             let repository =
-                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())?;
+                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())
+                    .await?;
             let value = client
                 .get(
                     &format!("repos/{repository}/releases/tags/{}", args.tag),
@@ -465,7 +512,8 @@ async fn release_command(
         }
         ReleaseCommand::Create(args) => {
             let repository =
-                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())?;
+                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())
+                    .await?;
             let body = form_body([
                 ("tag_name", Some(args.tag)),
                 ("name", args.title),
@@ -484,15 +532,21 @@ async fn pipeline_command(
     command: PipelineCommand,
     config: &Config,
     api_client: &GitcodeClient,
+    http: reqwest::Client,
     token: Option<String>,
     json_output: bool,
 ) -> anyhow::Result<()> {
-    let client = PipelineClient::new(actions_api_base_from_hostname(&config.hostname)?, token);
+    let client = PipelineClient::with_http_client(
+        http,
+        actions_api_base_from_hostname(&config.hostname)?,
+        token,
+    );
     match command {
         PipelineCommand::Set(args) => {
             validate_file_content_source(args.content.as_deref(), args.file.as_deref())?;
             let repository =
-                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())?;
+                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())
+                    .await?;
             let path = args.path.trim_start_matches('/').to_string();
             validate_workflow_path(&path)?;
             if args.mode == PipelineSetMode::Update
@@ -504,7 +558,7 @@ async fn pipeline_command(
             {
                 bail!("--sha is required when --mode update is used");
             }
-            let content = read_required_content(args.content, args.file.as_deref())?;
+            let content = read_required_content(args.content, args.file.as_deref()).await?;
             let body = workflow_file_body(WorkflowFileRequest {
                 content,
                 message: args.message,
@@ -665,7 +719,7 @@ async fn pipeline_repo_context(
     config: &Config,
     repository: Option<&str>,
 ) -> anyhow::Result<PipelineRepoContext> {
-    let repository = repo::resolve_repo(repository, config.default_repo.as_deref())?;
+    let repository = repo::resolve_repo(repository, config.default_repo.as_deref()).await?;
     let value = client.get(&format!("repos/{repository}"), &[]).await?;
     let project_id = string_field(&value, &["id", "project_id"])
         .ok_or_else(|| anyhow::anyhow!("repo response did not include a project id"))?;
@@ -691,15 +745,21 @@ fn value_as_string(value: &Value) -> Option<String> {
     }
 }
 
-fn read_required_content(
+async fn read_required_content(
     file_content: Option<String>,
     file: Option<&Path>,
 ) -> anyhow::Result<String> {
     if let Some(file) = file {
         let content = if file == Path::new("-") {
-            std::io::read_to_string(std::io::stdin())?
+            let mut content = String::new();
+            tokio::io::stdin()
+                .read_to_string(&mut content)
+                .await
+                .context("failed to read workflow content from stdin")?;
+            content
         } else {
-            std::fs::read_to_string(file)
+            tokio::fs::read_to_string(file)
+                .await
                 .with_context(|| format!("failed to read {}", file.display()))?
         };
         return Ok(content);

@@ -45,3 +45,11 @@ https://api.gitcode.com/api/v5
 
 Override it with `--api-base` or `GITCODE_API_BASE` when testing compatible
 hosts.
+
+## Network
+
+`gd` uses the system proxy behavior provided by reqwest. It honors
+`HTTP_PROXY`/`http_proxy`, `HTTPS_PROXY`/`https_proxy`,
+`ALL_PROXY`/`all_proxy`, and `NO_PROXY`/`no_proxy`.
+
+TLS certificate verification is disabled by default for GitCode API calls.

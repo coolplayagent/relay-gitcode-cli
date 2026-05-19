@@ -1,6 +1,7 @@
-use std::{path::PathBuf, process::Command};
+use std::path::PathBuf;
 
 use anyhow::{Context, bail};
+use tokio::process::Command;
 
 pub fn split_repo(input: &str) -> anyhow::Result<(&str, &str)> {
     let trimmed = input.trim().trim_matches('/');
@@ -13,10 +14,11 @@ pub fn split_repo(input: &str) -> anyhow::Result<(&str, &str)> {
     Ok((owner, repo))
 }
 
-pub fn current_repo() -> anyhow::Result<String> {
+pub async fn current_repo() -> anyhow::Result<String> {
     let output = Command::new("git")
         .args(["remote", "get-url", "origin"])
         .output()
+        .await
         .context("failed to inspect git remote origin")?;
     if !output.status.success() {
         bail!("could not determine repository; pass --repo owner/repo");
@@ -26,7 +28,10 @@ pub fn current_repo() -> anyhow::Result<String> {
     parse_remote_url(remote.trim()).context("could not parse git remote origin as GitCode repo")
 }
 
-pub fn resolve_repo(explicit: Option<&str>, default_repo: Option<&str>) -> anyhow::Result<String> {
+pub async fn resolve_repo(
+    explicit: Option<&str>,
+    default_repo: Option<&str>,
+) -> anyhow::Result<String> {
     if let Some(repo) = explicit {
         split_repo(repo)?;
         return Ok(repo.to_string());
@@ -35,14 +40,14 @@ pub fn resolve_repo(explicit: Option<&str>, default_repo: Option<&str>) -> anyho
         split_repo(repo)?;
         return Ok(repo.to_string());
     }
-    current_repo()
+    current_repo().await
 }
 
 pub fn clone_url(hostname: &str, repository: &str) -> String {
     format!("https://{hostname}/{repository}.git")
 }
 
-pub fn run_git_clone(
+pub async fn run_git_clone(
     hostname: &str,
     repository: &str,
     directory: Option<PathBuf>,
@@ -55,7 +60,7 @@ pub fn run_git_clone(
         command.arg(directory);
     }
     command.args(git_flags);
-    let status = command.status().context("failed to run git clone")?;
+    let status = command.status().await.context("failed to run git clone")?;
     if !status.success() {
         bail!("git clone failed with {status}");
     }

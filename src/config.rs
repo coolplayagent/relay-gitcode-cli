@@ -1,7 +1,4 @@
-use std::{
-    fs,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, bail};
 use serde::{Deserialize, Serialize};
@@ -28,13 +25,17 @@ impl Default for Config {
 }
 
 impl Config {
-    pub fn load() -> anyhow::Result<Self> {
+    pub async fn load() -> anyhow::Result<Self> {
         let path = config_path()?;
-        if !path.exists() {
+        if !tokio::fs::try_exists(&path)
+            .await
+            .with_context(|| format!("failed to inspect {}", path.display()))?
+        {
             return Ok(Self::default());
         }
 
-        let content = fs::read_to_string(&path)
+        let content = tokio::fs::read_to_string(&path)
+            .await
             .with_context(|| format!("failed to read {}", path.display()))?;
         let config: Self = serde_json::from_str(&content)
             .with_context(|| format!("failed to parse {}", path.display()))?;
@@ -42,15 +43,17 @@ impl Config {
         Ok(config)
     }
 
-    pub fn save(&self) -> anyhow::Result<()> {
+    pub async fn save(&self) -> anyhow::Result<()> {
         self.validate()?;
         let path = config_path()?;
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
+            tokio::fs::create_dir_all(parent)
+                .await
                 .with_context(|| format!("failed to create {}", parent.display()))?;
         }
         let content = serde_json::to_string_pretty(self)?;
-        fs::write(&path, format!("{content}\n"))
+        tokio::fs::write(&path, format!("{content}\n"))
+            .await
             .with_context(|| format!("failed to write {}", path.display()))?;
         Ok(())
     }

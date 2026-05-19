@@ -81,6 +81,12 @@ gd completion bash
 codespaces、gists、GitHub Actions workflow 管理、projects、rulesets、
 extensions、Copilot 等 GitHub 专属命令不会进入 `gd`，除非 GitCode 提供等价 API。
 
+## 网络
+
+`gd` 支持 reqwest 系统代理环境变量：`HTTP_PROXY`/`http_proxy`、
+`HTTPS_PROXY`/`https_proxy`、`ALL_PROXY`/`all_proxy` 和
+`NO_PROXY`/`no_proxy`。GitCode API 调用默认不校验 TLS 证书。
+
 ## 文档
 
 - [文档书架](docs/README.md)

@@ -85,6 +85,13 @@ GitHub-only gh commands such as codespaces, gists, GitHub Actions workflow
 management, projects, rulesets, extensions, and Copilot are intentionally not
 part of `gd` unless GitCode exposes equivalent API behavior.
 
+## Network
+
+`gd` honors reqwest system proxy environment variables:
+`HTTP_PROXY`/`http_proxy`, `HTTPS_PROXY`/`https_proxy`,
+`ALL_PROXY`/`all_proxy`, and `NO_PROXY`/`no_proxy`. TLS certificate
+verification is disabled by default for GitCode API calls.
+
 ## Documentation
 
 - [Documentation Bookshelf](docs/README.md)
