@@ -8,9 +8,16 @@ mod pipeline;
 mod repo;
 
 use anyhow::Context;
-use clap::Parser;
+use clap::{
+    Parser,
+    error::ErrorKind::{DisplayHelp, DisplayVersion},
+};
 
-use crate::{auth::KeyringCredentialStore, cli::Cli, config::Config};
+use crate::{
+    auth::KeyringCredentialStore,
+    cli::{Cli, ParseDiagnostic},
+    config::Config,
+};
 
 #[tokio::main]
 async fn main() {
@@ -21,7 +28,16 @@ async fn main() {
 }
 
 async fn run() -> anyhow::Result<()> {
-    let cli = Cli::parse();
+    let args = std::env::args_os().collect::<Vec<_>>();
+    let cli = match Cli::try_parse_from(args.clone()) {
+        Ok(cli) => cli,
+        Err(error) if matches!(error.kind(), DisplayHelp | DisplayVersion) => error.exit(),
+        Err(error) => {
+            let diagnostic = ParseDiagnostic::from_error(&args, &error);
+            eprintln!("{}", diagnostic.render_stderr());
+            std::process::exit(error.exit_code());
+        }
+    };
     let mut config = Config::load().context("failed to load gd config")?;
     config.apply_overrides(
         Some(cli.global.hostname.as_str()),

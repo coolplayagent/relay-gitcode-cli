@@ -65,6 +65,15 @@ impl GitcodeClient {
             .await
     }
 
+    pub async fn put<T: Serialize + ?Sized>(
+        &self,
+        endpoint: &str,
+        body: &T,
+    ) -> anyhow::Result<Value> {
+        self.request_json("PUT", endpoint, &[], Some(json!(body)))
+            .await
+    }
+
     pub async fn delete(&self, endpoint: &str) -> anyhow::Result<Value> {
         self.request_json("DELETE", endpoint, &[], None).await
     }
