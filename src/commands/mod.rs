@@ -7,16 +7,18 @@ use serde_json::{Value, json};
 use crate::{
     auth::CredentialStore,
     cli::{
-        AuthCommand, Cli, Command, CompletionArgs, GlobalArgs, IssueCommand, LabelCommand,
-        PipelineCommand, PrCommand, ReleaseCommand, RepoCommand, SearchCommand, Shell,
+        AuthCommand, Cli, Command, CompletionArgs, IssueCommand, LabelCommand, PipelineCommand,
+        PipelineSetMode, PrCommand, ReleaseCommand, RepoCommand, SearchCommand, Shell,
         SshKeyCommand,
     },
     client::{ApiRequest, GitcodeClient, form_body, merge_pages, query},
     config::Config,
     output::print_value,
     pipeline::{
-        PipelineAuth, PipelineClient, PipelineRegisterRequest, PipelineRunRequest,
-        PipelineRunsRequest, parse_pipeline_api_base, validate_file_content_source,
+        PipelineClient, WorkflowDispatchRequest, WorkflowFileRequest, WorkflowListRequest,
+        WorkflowRunListRequest, actions_api_base_from_hostname, extract_log_text,
+        parse_key_value_inputs, validate_file_content_source, validate_workflow_path,
+        workflow_file_body,
     },
     repo,
 };
@@ -79,7 +81,7 @@ pub async fn run(
                     release_command(command, &config, &client, cli.global.json).await
                 }
                 Command::Pipeline(command) => {
-                    pipeline_command(command, &config, &cli.global, token, cli.global.json).await
+                    pipeline_command(command, &config, &client, token, cli.global.json).await
                 }
                 Command::Completion(_) | Command::Auth(_) => unreachable!(),
             }
@@ -467,82 +469,114 @@ async fn release_command(
 async fn pipeline_command(
     command: PipelineCommand,
     config: &Config,
-    global: &GlobalArgs,
+    api_client: &GitcodeClient,
     token: Option<String>,
     json_output: bool,
 ) -> anyhow::Result<()> {
-    let client = pipeline_client(global, token)?;
+    let client = PipelineClient::new(actions_api_base_from_hostname(&config.hostname)?, token);
     match command {
-        PipelineCommand::Register(args) => {
-            validate_file_content_source(args.file_content.as_deref(), args.file.as_deref())?;
+        PipelineCommand::Set(args) => {
+            validate_file_content_source(args.content.as_deref(), args.file.as_deref())?;
             let repository =
                 repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())?;
-            let file_content = read_optional_content(args.file_content, args.file.as_deref())?;
+            let path = args.path.trim_start_matches('/').to_string();
+            validate_workflow_path(&path)?;
+            if args.mode == PipelineSetMode::Update
+                && args
+                    .sha
+                    .as_deref()
+                    .filter(|value| !value.is_empty())
+                    .is_none()
+            {
+                bail!("--sha is required when --mode update is used");
+            }
+            let content = read_required_content(args.content, args.file.as_deref())?;
+            let body = workflow_file_body(WorkflowFileRequest {
+                content,
+                message: args.message,
+                branch: args.branch,
+                sha: args.sha,
+            });
+            let endpoint = format!("repos/{repository}/contents/{path}");
+            let value = match args.mode {
+                PipelineSetMode::Create => api_client.post(&endpoint, &body).await?,
+                PipelineSetMode::Update => api_client.put(&endpoint, &body).await?,
+            };
+            print_value(json_output, &value)
+        }
+        PipelineCommand::List(args) => {
+            let context =
+                pipeline_repo_context(api_client, config, args.repository.as_deref()).await?;
             let value = client
-                .register(PipelineRegisterRequest {
-                    kind: args.kind,
-                    https_url: repo::clone_url(&config.hostname, &repository),
-                    repo_id: args.repo_id,
-                    old_file_path: args.old_file_path,
-                    new_file_path: args.new_file_path,
-                    file_content,
-                    encoding: args.encoding,
-                    default_branch: args.default_branch,
-                    file_commit_id: args.file_commit_id,
-                })
+                .list_workflows(
+                    &context.project_id,
+                    WorkflowListRequest {
+                        page: args.page,
+                        per_page: args.limit,
+                    },
+                )
                 .await?;
             print_value(json_output, &value)
         }
         PipelineCommand::Run(args) => {
-            validate_file_content_source(args.file_content.as_deref(), args.file.as_deref())?;
-            let https_url =
-                resolve_pipeline_https_url(args.repository.as_deref(), args.https_url, config)?;
-            let file_content = read_optional_content(args.file_content, args.file.as_deref())?;
+            validate_workflow_path(&args.file_path)?;
+            let context =
+                pipeline_repo_context(api_client, config, args.repository.as_deref()).await?;
+            let inputs = parse_key_value_inputs(&args.inputs)?;
             let value = client
-                .run(PipelineRunRequest {
-                    https_url,
-                    file_path: args.file_path,
-                    file_content,
-                    branch: args.branch,
-                    encoding: args.encoding,
-                    tag: args.tag,
-                    commit_id: args.commit_id,
-                    access_token: args.access_token,
-                })
+                .dispatch(
+                    &context.project_id,
+                    &args.workflow_id,
+                    WorkflowDispatchRequest {
+                        repo_id: Some(context.project_id.clone()),
+                        repo_https_url: context.repo_https_url,
+                        file_path: args.file_path,
+                        branch: args.branch,
+                        branch_commit_id: args.branch_commit_id,
+                        inputs,
+                    },
+                )
                 .await?;
             print_value(json_output, &value)
         }
         PipelineCommand::Runs(args) => {
-            let https_url =
-                resolve_pipeline_https_url(args.repository.as_deref(), args.https_url, config)?;
+            let context =
+                pipeline_repo_context(api_client, config, args.repository.as_deref()).await?;
             let value = client
-                .runs(PipelineRunsRequest {
-                    https_url,
-                    pipeline_name: args.pipeline_name,
-                    file_path: args.file_path,
-                    pipeline_run_name: args.pipeline_run_name,
-                    event: args.event,
-                    actor: args.actor,
-                    branch: args.branch,
-                    status: args.status,
-                    offset: args.offset,
-                    limit: args.limit,
-                })
+                .list_runs(
+                    &context.project_id,
+                    WorkflowRunListRequest {
+                        workflow_id: args.workflow_id,
+                        workflow_name: args.workflow_name,
+                        event: args.event,
+                        status: args.status,
+                        branch: args.branch,
+                        executor_id: args.executor_id,
+                        mr_id: args.mr_id,
+                        page: args.page,
+                        per_page: args.limit,
+                    },
+                )
                 .await?;
             print_value(json_output, &value)
         }
         PipelineCommand::View(args) => {
+            let context =
+                pipeline_repo_context(api_client, config, args.repository.as_deref()).await?;
             let value = client
-                .view(&args.pipeline_id, &args.pipeline_run_id)
+                .view_run(&context.project_id, &args.workflow_run_id)
                 .await?;
             print_value(json_output, &value)
         }
         PipelineCommand::Log(args) => {
+            let context =
+                pipeline_repo_context(api_client, config, args.repository.as_deref()).await?;
             let value = client
-                .log(
-                    &args.pipeline_id,
-                    &args.pipeline_run_id,
-                    &args.job_run_id,
+                .job_log(
+                    &context.project_id,
+                    &args.workflow_run_id,
+                    &args.job_identifier,
+                    args.step_run_id,
                     args.offset,
                     args.limit,
                 )
@@ -550,14 +584,32 @@ async fn pipeline_command(
             print_pipeline_log(json_output, &value)
         }
         PipelineCommand::Stop(args) => {
+            let context =
+                pipeline_repo_context(api_client, config, args.repository.as_deref()).await?;
             let value = client
-                .stop(&args.pipeline_id, &args.pipeline_run_id)
+                .stop_run(&context.project_id, &args.workflow_run_id)
                 .await?;
             print_value(json_output, &value)
         }
         PipelineCommand::Retry(args) => {
+            let context =
+                pipeline_repo_context(api_client, config, args.repository.as_deref()).await?;
+            let repo_https_url = (!args.job_run_ids.is_empty()).then_some(context.repo_https_url);
             let value = client
-                .retry(args.pipeline_id, args.pipeline_run_id, args.access_token)
+                .retry_run(
+                    &context.project_id,
+                    &args.workflow_run_id,
+                    repo_https_url,
+                    args.job_run_ids,
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        PipelineCommand::Rerun(args) => {
+            let context =
+                pipeline_repo_context(api_client, config, args.repository.as_deref()).await?;
+            let value = client
+                .rerun(&context.project_id, &args.workflow_run_id)
                 .await?;
             print_value(json_output, &value)
         }
@@ -588,43 +640,47 @@ fn join(values: Vec<String>) -> Option<String> {
     }
 }
 
-fn pipeline_client(global: &GlobalArgs, token: Option<String>) -> anyhow::Result<PipelineClient> {
-    let api_base = global
-        .pipeline_api_base
-        .as_deref()
-        .ok_or_else(|| anyhow::anyhow!("set --pipeline-api-base or GITCODE_PIPELINE_API_BASE"))?;
-    let domain_id = global
-        .pipeline_domain_id
-        .as_deref()
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| anyhow::anyhow!("set --pipeline-domain-id or GITCODE_PIPELINE_DOMAIN_ID"))?;
-    let auth = PipelineAuth::from_env_or_token(token)?;
-    Ok(PipelineClient::new(
-        parse_pipeline_api_base(api_base)?,
-        domain_id.to_string(),
-        auth,
-    ))
+#[derive(Debug)]
+struct PipelineRepoContext {
+    project_id: String,
+    repo_https_url: String,
 }
 
-fn resolve_pipeline_https_url(
-    repository: Option<&str>,
-    https_url: Option<String>,
+async fn pipeline_repo_context(
+    client: &GitcodeClient,
     config: &Config,
-) -> anyhow::Result<String> {
-    if let Some(https_url) = https_url {
-        if repository.is_some() {
-            bail!("use either --repo or --https-url, not both");
-        }
-        return Ok(https_url);
-    }
+    repository: Option<&str>,
+) -> anyhow::Result<PipelineRepoContext> {
     let repository = repo::resolve_repo(repository, config.default_repo.as_deref())?;
-    Ok(repo::clone_url(&config.hostname, &repository))
+    let value = client.get(&format!("repos/{repository}"), &[]).await?;
+    let project_id = string_field(&value, &["id", "project_id"])
+        .ok_or_else(|| anyhow::anyhow!("repo response did not include a project id"))?;
+    let repo_https_url = string_field(&value, &["http_url_to_repo", "clone_url"])
+        .unwrap_or_else(|| repo::clone_url(&config.hostname, &repository));
+    Ok(PipelineRepoContext {
+        project_id,
+        repo_https_url,
+    })
 }
 
-fn read_optional_content(
+fn string_field(value: &Value, keys: &[&str]) -> Option<String> {
+    keys.iter()
+        .filter_map(|key| value.get(*key).and_then(value_as_string))
+        .find(|value| !value.trim().is_empty())
+}
+
+fn value_as_string(value: &Value) -> Option<String> {
+    match value {
+        Value::String(value) => Some(value.to_string()),
+        Value::Number(value) => Some(value.to_string()),
+        _ => None,
+    }
+}
+
+fn read_required_content(
     file_content: Option<String>,
     file: Option<&Path>,
-) -> anyhow::Result<Option<String>> {
+) -> anyhow::Result<String> {
     if let Some(file) = file {
         let content = if file == Path::new("-") {
             std::io::read_to_string(std::io::stdin())?
@@ -632,16 +688,16 @@ fn read_optional_content(
             std::fs::read_to_string(file)
                 .with_context(|| format!("failed to read {}", file.display()))?
         };
-        return Ok(Some(content));
+        return Ok(content);
     }
-    Ok(file_content)
+    file_content.ok_or_else(|| anyhow::anyhow!("set workflow content with --content or --file"))
 }
 
 fn print_pipeline_log(json_output: bool, value: &Value) -> anyhow::Result<()> {
     if json_output {
         return print_value(true, value);
     }
-    if let Some(log) = value.get("log").and_then(Value::as_str) {
+    if let Some(log) = extract_log_text(value) {
         print!("{log}");
         if !log.ends_with('\n') {
             println!();

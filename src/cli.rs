@@ -35,20 +35,6 @@ pub struct GlobalArgs {
     pub api_base: String,
     #[arg(long, global = true, help = "Render command output as JSON")]
     pub json: bool,
-    #[arg(
-        long,
-        global = true,
-        env = "GITCODE_PIPELINE_API_BASE",
-        help = "CodeArts Pipeline API base URL"
-    )]
-    pub pipeline_api_base: Option<String>,
-    #[arg(
-        long,
-        global = true,
-        env = "GITCODE_PIPELINE_DOMAIN_ID",
-        help = "CodeArts tenant domain ID for pipeline APIs"
-    )]
-    pub pipeline_domain_id: Option<String>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -79,7 +65,7 @@ pub enum Command {
     #[command(about = "Manage repository releases")]
     #[command(subcommand)]
     Release(ReleaseCommand),
-    #[command(about = "Manage GitCode pipelines")]
+    #[command(about = "Manage GitCode pipelines", visible_alias = "actions")]
     #[command(subcommand)]
     Pipeline(PipelineCommand),
     #[command(about = "Generate shell completion scripts")]
@@ -416,68 +402,77 @@ pub struct ReleaseCreateArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum PipelineCommand {
-    #[command(about = "Register or update a GitCode workflow action")]
-    Register(PipelineRegisterArgs),
-    #[command(about = "Run a GitCode pipeline")]
+    #[command(
+        about = "Create or update a GitCode workflow file",
+        visible_alias = "register"
+    )]
+    Set(PipelineSetArgs),
+    #[command(about = "List GitCode workflow files")]
+    List(PipelineListArgs),
+    #[command(about = "Manually run a GitCode workflow")]
     Run(PipelineRunArgs),
-    #[command(about = "List GitCode pipeline execution records")]
+    #[command(about = "List GitCode workflow run records")]
     Runs(PipelineRunsArgs),
-    #[command(about = "View a GitCode pipeline run")]
+    #[command(about = "View a GitCode workflow run")]
     View(PipelineViewArgs),
-    #[command(about = "Read a GitCode pipeline job log")]
+    #[command(about = "Read a GitCode workflow job log")]
     Log(PipelineLogArgs),
-    #[command(about = "Stop a GitCode pipeline run")]
+    #[command(about = "Stop a GitCode workflow run")]
     Stop(PipelineStopArgs),
-    #[command(about = "Retry a GitCode pipeline run")]
+    #[command(about = "Retry failed GitCode workflow jobs")]
     Retry(PipelineRetryArgs),
+    #[command(about = "Rerun all jobs in a GitCode workflow run")]
+    Rerun(PipelineRerunArgs),
 }
 
 #[derive(Debug, Args)]
-pub struct PipelineRegisterArgs {
+pub struct PipelineSetArgs {
     #[arg(short = 'R', long = "repo")]
     pub repository: Option<String>,
-    #[arg(long = "type")]
-    pub kind: String,
+    pub path: String,
+    #[arg(long, value_enum, default_value_t = PipelineSetMode::Create)]
+    pub mode: PipelineSetMode,
     #[arg(long)]
-    pub new_file_path: String,
-    #[arg(long)]
-    pub old_file_path: Option<String>,
-    #[arg(long)]
-    pub file_content: Option<String>,
+    pub content: Option<String>,
     #[arg(long)]
     pub file: Option<PathBuf>,
+    #[arg(short = 'm', long, default_value = "Configure GitCode workflow")]
+    pub message: String,
     #[arg(long)]
-    pub encoding: Option<String>,
+    pub branch: Option<String>,
     #[arg(long)]
-    pub default_branch: Option<String>,
-    #[arg(long)]
-    pub file_commit_id: Option<String>,
-    #[arg(long)]
-    pub repo_id: Option<String>,
+    pub sha: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum PipelineSetMode {
+    Create,
+    Update,
+}
+
+#[derive(Debug, Args)]
+pub struct PipelineListArgs {
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(long, default_value_t = 1)]
+    pub page: u64,
+    #[arg(short = 'L', long = "limit", default_value_t = 50)]
+    pub limit: u64,
 }
 
 #[derive(Debug, Args)]
 pub struct PipelineRunArgs {
     #[arg(short = 'R', long = "repo")]
     pub repository: Option<String>,
-    #[arg(long)]
-    pub https_url: Option<String>,
+    pub workflow_id: String,
     #[arg(long)]
     pub file_path: String,
     #[arg(long)]
-    pub file_content: Option<String>,
-    #[arg(long)]
-    pub file: Option<PathBuf>,
-    #[arg(long)]
     pub branch: Option<String>,
     #[arg(long)]
-    pub encoding: Option<String>,
-    #[arg(long)]
-    pub tag: Option<String>,
-    #[arg(long)]
-    pub commit_id: Option<String>,
-    #[arg(long, env = "GITCODE_PIPELINE_ACCESS_TOKEN", hide_env_values = true)]
-    pub access_token: Option<String>,
+    pub branch_commit_id: Option<String>,
+    #[arg(long = "input")]
+    pub inputs: Vec<String>,
 }
 
 #[derive(Debug, Args)]
@@ -485,38 +480,40 @@ pub struct PipelineRunsArgs {
     #[arg(short = 'R', long = "repo")]
     pub repository: Option<String>,
     #[arg(long)]
-    pub https_url: Option<String>,
+    pub workflow_id: Option<String>,
     #[arg(long)]
-    pub pipeline_name: Option<String>,
-    #[arg(long)]
-    pub file_path: Option<String>,
-    #[arg(long)]
-    pub pipeline_run_name: Option<String>,
+    pub workflow_name: Option<String>,
     #[arg(long)]
     pub event: Option<String>,
-    #[arg(long)]
-    pub actor: Option<String>,
     #[arg(long)]
     pub branch: Option<String>,
     #[arg(long)]
     pub status: Option<String>,
-    #[arg(long, default_value_t = 0)]
-    pub offset: u64,
-    #[arg(long, default_value_t = 10)]
+    #[arg(long)]
+    pub executor_id: Option<String>,
+    #[arg(long)]
+    pub mr_id: Option<String>,
+    #[arg(long, default_value_t = 1)]
+    pub page: u64,
+    #[arg(short = 'L', long = "limit", default_value_t = 20)]
     pub limit: u64,
 }
 
 #[derive(Debug, Args)]
 pub struct PipelineViewArgs {
-    pub pipeline_id: String,
-    pub pipeline_run_id: String,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    pub workflow_run_id: String,
 }
 
 #[derive(Debug, Args)]
 pub struct PipelineLogArgs {
-    pub pipeline_id: String,
-    pub pipeline_run_id: String,
-    pub job_run_id: String,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    pub workflow_run_id: String,
+    pub job_identifier: String,
+    #[arg(long)]
+    pub step_run_id: Option<String>,
     #[arg(long, default_value_t = 0)]
     pub offset: u64,
     #[arg(long, default_value_t = 100)]
@@ -525,16 +522,25 @@ pub struct PipelineLogArgs {
 
 #[derive(Debug, Args)]
 pub struct PipelineStopArgs {
-    pub pipeline_id: String,
-    pub pipeline_run_id: String,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    pub workflow_run_id: String,
 }
 
 #[derive(Debug, Args)]
 pub struct PipelineRetryArgs {
-    pub pipeline_id: String,
-    pub pipeline_run_id: String,
-    #[arg(long, env = "GITCODE_PIPELINE_ACCESS_TOKEN", hide_env_values = true)]
-    pub access_token: Option<String>,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    pub workflow_run_id: String,
+    #[arg(long = "job-run-id")]
+    pub job_run_ids: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct PipelineRerunArgs {
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    pub workflow_run_id: String,
 }
 
 #[derive(Debug, Args)]
@@ -615,39 +621,65 @@ mod tests {
     }
 
     #[test]
-    fn parses_pipeline_register() {
+    fn parses_pipeline_set() {
         let cli = Cli::try_parse_from([
             "gd",
-            "--pipeline-api-base",
-            "https://devcloud.example.com",
-            "--pipeline-domain-id",
-            "domain",
+            "pipeline",
+            "set",
+            "--repo",
+            "owner/repo",
+            ".gitcode/workflows/ci.yml",
+            "--content",
+            "name: ci",
+            "--mode",
+            "update",
+            "--sha",
+            "abc",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Command::Pipeline(PipelineCommand::Set(args)) => {
+                assert_eq!(args.repository.as_deref(), Some("owner/repo"));
+                assert_eq!(args.path, ".gitcode/workflows/ci.yml");
+                assert_eq!(args.content.as_deref(), Some("name: ci"));
+                assert_eq!(args.mode, PipelineSetMode::Update);
+                assert_eq!(args.sha.as_deref(), Some("abc"));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_pipeline_register_alias() {
+        let cli = Cli::try_parse_from([
+            "gd",
             "pipeline",
             "register",
             "--repo",
             "owner/repo",
-            "--type",
-            "create",
-            "--new-file-path",
             ".gitcode/workflows/ci.yml",
-            "--file-content",
+            "--content",
             "name: ci",
-            "--encoding",
-            "UTF-8",
         ])
         .unwrap();
 
-        assert_eq!(
-            cli.global.pipeline_api_base.as_deref(),
-            Some("https://devcloud.example.com")
-        );
-        assert_eq!(cli.global.pipeline_domain_id.as_deref(), Some("domain"));
+        assert!(matches!(
+            cli.command,
+            Command::Pipeline(PipelineCommand::Set(_))
+        ));
+    }
+
+    #[test]
+    fn parses_actions_alias() {
+        let cli =
+            Cli::try_parse_from(["gd", "actions", "list", "--repo", "owner/repo", "-L", "10"])
+                .unwrap();
+
         match cli.command {
-            Command::Pipeline(PipelineCommand::Register(args)) => {
+            Command::Pipeline(PipelineCommand::List(args)) => {
                 assert_eq!(args.repository.as_deref(), Some("owner/repo"));
-                assert_eq!(args.kind, "create");
-                assert_eq!(args.new_file_path, ".gitcode/workflows/ci.yml");
-                assert_eq!(args.file_content.as_deref(), Some("name: ci"));
+                assert_eq!(args.limit, 10);
             }
             other => panic!("unexpected command: {other:?}"),
         }
@@ -661,21 +693,26 @@ mod tests {
             "run",
             "--repo",
             "owner/repo",
+            "workflow-1",
             "--file-path",
             ".gitcode/workflows/ci.yml",
             "--branch",
             "main",
-            "--commit-id",
+            "--branch-commit-id",
             "abc",
+            "--input",
+            "dry_run=true",
         ])
         .unwrap();
 
         match cli.command {
             Command::Pipeline(PipelineCommand::Run(args)) => {
                 assert_eq!(args.repository.as_deref(), Some("owner/repo"));
+                assert_eq!(args.workflow_id, "workflow-1");
                 assert_eq!(args.file_path, ".gitcode/workflows/ci.yml");
                 assert_eq!(args.branch.as_deref(), Some("main"));
-                assert_eq!(args.commit_id.as_deref(), Some("abc"));
+                assert_eq!(args.branch_commit_id.as_deref(), Some("abc"));
+                assert_eq!(args.inputs, ["dry_run=true"]);
             }
             other => panic!("unexpected command: {other:?}"),
         }
@@ -687,28 +724,25 @@ mod tests {
             "gd",
             "pipeline",
             "runs",
-            "--https-url",
-            "https://gitcode.com/owner/repo.git",
-            "--pipeline-name",
+            "--repo",
+            "owner/repo",
+            "--workflow-name",
             "ci",
             "--event",
             "push",
-            "--offset",
-            "10",
-            "--limit",
+            "--page",
+            "2",
+            "-L",
             "20",
         ])
         .unwrap();
 
         match cli.command {
             Command::Pipeline(PipelineCommand::Runs(args)) => {
-                assert_eq!(
-                    args.https_url.as_deref(),
-                    Some("https://gitcode.com/owner/repo.git")
-                );
-                assert_eq!(args.pipeline_name.as_deref(), Some("ci"));
+                assert_eq!(args.repository.as_deref(), Some("owner/repo"));
+                assert_eq!(args.workflow_name.as_deref(), Some("ci"));
                 assert_eq!(args.event.as_deref(), Some("push"));
-                assert_eq!(args.offset, 10);
+                assert_eq!(args.page, 2);
                 assert_eq!(args.limit, 20);
             }
             other => panic!("unexpected command: {other:?}"),
@@ -716,38 +750,71 @@ mod tests {
     }
 
     #[test]
-    fn parses_pipeline_view_log_stop_and_retry() {
-        let view = Cli::try_parse_from(["gd", "pipeline", "view", "pipe", "run"]).unwrap();
+    fn parses_pipeline_view_log_stop_retry_and_rerun() {
+        let view =
+            Cli::try_parse_from(["gd", "pipeline", "view", "--repo", "owner/repo", "run"]).unwrap();
         match view.command {
             Command::Pipeline(PipelineCommand::View(args)) => {
-                assert_eq!(args.pipeline_id, "pipe");
-                assert_eq!(args.pipeline_run_id, "run");
+                assert_eq!(args.repository.as_deref(), Some("owner/repo"));
+                assert_eq!(args.workflow_run_id, "run");
             }
             other => panic!("unexpected command: {other:?}"),
         }
 
         let log = Cli::try_parse_from([
-            "gd", "pipeline", "log", "pipe", "run", "job", "--limit", "7",
+            "gd",
+            "pipeline",
+            "log",
+            "--repo",
+            "owner/repo",
+            "run",
+            "job",
+            "--step-run-id",
+            "step",
+            "--limit",
+            "7",
         ])
         .unwrap();
         match log.command {
             Command::Pipeline(PipelineCommand::Log(args)) => {
-                assert_eq!(args.job_run_id, "job");
+                assert_eq!(args.workflow_run_id, "run");
+                assert_eq!(args.job_identifier, "job");
+                assert_eq!(args.step_run_id.as_deref(), Some("step"));
                 assert_eq!(args.limit, 7);
             }
             other => panic!("unexpected command: {other:?}"),
         }
 
-        let stop = Cli::try_parse_from(["gd", "pipeline", "stop", "pipe", "run"]).unwrap();
+        let stop =
+            Cli::try_parse_from(["gd", "pipeline", "stop", "-R", "owner/repo", "run"]).unwrap();
         assert!(matches!(
             stop.command,
             Command::Pipeline(PipelineCommand::Stop(_))
         ));
 
-        let retry = Cli::try_parse_from(["gd", "pipeline", "retry", "pipe", "run"]).unwrap();
+        let retry = Cli::try_parse_from([
+            "gd",
+            "pipeline",
+            "retry",
+            "-R",
+            "owner/repo",
+            "run",
+            "--job-run-id",
+            "job",
+        ])
+        .unwrap();
+        match retry.command {
+            Command::Pipeline(PipelineCommand::Retry(args)) => {
+                assert_eq!(args.job_run_ids, ["job"]);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        let rerun =
+            Cli::try_parse_from(["gd", "pipeline", "rerun", "-R", "owner/repo", "run"]).unwrap();
         assert!(matches!(
-            retry.command,
-            Command::Pipeline(PipelineCommand::Retry(_))
+            rerun.command,
+            Command::Pipeline(PipelineCommand::Rerun(_))
         ));
     }
 }
