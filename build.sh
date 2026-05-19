@@ -1,6 +1,9 @@
 #!/usr/bin/env sh
 set -eu
 
+BINARY="gd"
+SCRIPT_DIR=$(CDPATH= cd "$(dirname "$0")" && pwd)
+
 PROFILE="release"
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -19,12 +22,16 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+cd "$SCRIPT_DIR"
+
 if [ "$PROFILE" = "debug" ]; then
-  echo "Building gd debug binary..."
-  cargo build
+  TARGET_DIR="debug"
+  echo "Building $BINARY debug binary..."
+  cargo build --bin "$BINARY"
 else
-  echo "Building gd release binary..."
-  cargo build --release
+  TARGET_DIR="release"
+  echo "Building $BINARY release binary..."
+  cargo build --release --bin "$BINARY"
 fi
 
-echo "Build completed."
+echo "Build completed: target/$TARGET_DIR/$BINARY"
