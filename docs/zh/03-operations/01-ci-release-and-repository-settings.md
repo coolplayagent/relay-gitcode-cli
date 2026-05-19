@@ -28,7 +28,7 @@ GitCode workflow 位于 `.gitcode/workflows`。Rust 流水线在 `repo_workspace
 
 CodeCheck workflow 应先在 GitCode 项目中配置 `CODECHECK_ACCESS_TOKEN` 等
 secret，再生成 workflow，避免把 token 值写进仓库。pull request 运行会检查
-源分支，push 运行会检查当前 ref：
+源仓库和源分支，push 运行会检查配置的仓库 URL 和当前 ref：
 
 ```bash
 gd pipeline codecheck --repo owner/repo --language SHELL --access-token-secret CODECHECK_ACCESS_TOKEN

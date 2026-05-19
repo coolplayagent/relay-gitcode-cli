@@ -274,9 +274,11 @@ pub fn codecheck_workflow_content(request: CodecheckWorkflowRequest) -> anyhow::
     let access_token = format!("${{{{ secrets.{} }}}}", request.access_token_secret);
     let name = yaml_quote(&request.name);
     let trigger_branch = yaml_quote(&request.branch);
-    let repo_url = yaml_quote(&request.repo_url);
+    let fallback_repo_url = github_expression_string_literal(&request.repo_url);
     let rule_sets = yaml_quote(&rule_sets);
     let access_token = yaml_quote(&access_token);
+    let codecheck_repo_url =
+        format!("${{{{ github.event.pull_request.head.repo.clone_url || {fallback_repo_url} }}}}");
     let codecheck_branch = "${{ github.head_ref || github.ref_name }}";
 
     Ok(format!(
@@ -296,7 +298,7 @@ jobs:
       - name: codecheck-action-task
         uses: codecheck-action@0.0.3
         with:
-          repo_url: {repo_url}
+          repo_url: {codecheck_repo_url}
           branch: {codecheck_branch}
           rule_sets: {rule_sets}
           access_token: {access_token}
@@ -492,6 +494,10 @@ fn yaml_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "''"))
 }
 
+fn github_expression_string_literal(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
+
 fn parse_input_value(value: &str) -> Value {
     serde_json::from_str(value).unwrap_or_else(|_| Value::String(value.to_string()))
 }
@@ -593,6 +599,9 @@ mod tests {
         .unwrap();
 
         assert!(content.contains("uses: codecheck-action@0.0.3"));
+        assert!(content.contains(
+            "repo_url: ${{ github.event.pull_request.head.repo.clone_url || 'https://gitcode.com/owner/repo.git' }}"
+        ));
         assert!(
             content.contains("rule_sets: '[{\"language\":\"SHELL\"},{\"language\":\"RUST\"}]'")
         );

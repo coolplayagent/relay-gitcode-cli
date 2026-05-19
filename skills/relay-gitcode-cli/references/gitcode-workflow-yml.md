@@ -72,8 +72,8 @@ gd pipeline codecheck --repo owner/repo --language SHELL --access-token-secret C
 
 The generated workflow uses `codecheck-action@0.0.3` with `repo_url`,
 `branch`, `rule_sets`, and `access_token` inputs as documented by GitCode
-CodeCheck. Pull request runs pass the PR source branch to CodeCheck; push runs
-pass the current ref.
+CodeCheck. Pull request runs pass the PR source repository and branch to
+CodeCheck; push runs pass the configured repository URL and current ref.
 
 ## Rust CLI CI
 

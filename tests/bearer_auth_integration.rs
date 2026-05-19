@@ -384,6 +384,9 @@ fn gd_pipeline_codecheck_creates_workflow_without_leaking_token() {
     let content = String::from_utf8(STANDARD.decode(content).expect("decode workflow content"))
         .expect("workflow content is utf-8");
     assert!(content.contains("uses: codecheck-action@0.0.3"));
+    assert!(content.contains(
+        "repo_url: ${{ github.event.pull_request.head.repo.clone_url || 'https://gitcode.com/owner/repo.git' }}"
+    ));
     assert!(content.contains("branch: ${{ github.head_ref || github.ref_name }}"));
     assert!(content.contains("access_token: '${{ secrets.CODECHECK_TOKEN }}'"));
     assert!(!content.contains("integration-token"));

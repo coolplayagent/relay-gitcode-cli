@@ -224,8 +224,8 @@ gd pipeline codecheck \
 ```
 
 The generated workflow filters push and pull request events by the configured
-target branch, then passes the pull request source branch or current push ref to
-`codecheck-action@0.0.3`.
+target branch, then passes the pull request source repository and branch or the
+current push repository/ref to `codecheck-action@0.0.3`.
 
 Run and inspect pipelines:
 

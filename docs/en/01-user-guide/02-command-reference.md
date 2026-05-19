@@ -71,7 +71,8 @@ gd pipeline rerun --repo owner/repo workflow-run-id
 API. `gd pipeline codecheck` writes `.gitcode/workflows/codecheck.yml` with
 `codecheck-action@0.0.3` and references the configured secret name instead of
 embedding a personal access token. The generated CodeCheck action checks the
-source branch for pull request events and the current ref for push events.
+source repository and branch for pull request events, and the configured
+repository URL plus current ref for push events.
 `gd pipeline log` prints raw log text by default; add `--json` to keep the full
 response envelope.
 

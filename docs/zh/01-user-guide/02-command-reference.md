@@ -68,7 +68,8 @@ gd pipeline rerun --repo owner/repo workflow-run-id
 `gd pipeline codecheck` 会写入 `.gitcode/workflows/codecheck.yml`，使用
 `codecheck-action@0.0.3`，并引用配置的 secret 名称而不是把个人访问 token
 写进仓库。生成的 CodeCheck action 会在 pull request 事件中检查源分支，在
-push 事件中检查当前 ref。`gd pipeline log` 默认输出原始日志文本；添加
+pull request 来自 fork 时也会使用源仓库 URL；push 事件会检查配置的仓库 URL
+和当前 ref。`gd pipeline log` 默认输出原始日志文本；添加
 `--json` 可保留完整响应结构。
 
 ## 其他 GitCode 资源
