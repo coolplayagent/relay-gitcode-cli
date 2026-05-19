@@ -135,5 +135,6 @@ gd api /user --json
 gd --api-base https://api.gitcode.com/api/v5 api /user --json
 ```
 
-For more command recipes and API automation patterns, read
-`references/cli-workflows.md`.
+For more command recipes, API automation patterns, and GitCode workflow YAML
+examples, read `references/cli-workflows.md` and
+`references/gitcode-workflow-yml.md`.
