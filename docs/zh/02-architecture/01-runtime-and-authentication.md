@@ -6,8 +6,8 @@
 - `src/commands/mod.rs` 把解析后的命令映射到 GitCode API 调用。
 - `src/client.rs` 负责 HTTP 请求构造、认证 header、分页、JSON 解码和 API 错误映射。
 - `src/http.rs` 负责共享 reqwest 客户端策略，包括异步传输、代理复用和 TLS 校验默认值。
-- `src/pipeline.rs` 负责 GitCode Actions endpoint 构造、请求体组织、
-  workflow 文件辅助逻辑和流水线 API 错误映射。
+- `src/pipeline.rs` 负责 OpenLibing gateway endpoint 构造、OAuth callback
+  解析、请求认证和流水线门禁 API 错误映射。
 - `src/auth.rs` 负责环境变量和 keyring token 查找。
 - `src/config.rs` 负责非敏感 host 和 API base 配置。
 
@@ -22,9 +22,18 @@ Authorization: Bearer <token>
 
 这与 GitCode API v5 文档一致，并避免默认把 token 放到 query string。
 
-流水线命令使用同一套 Bearer token 流程。workflow 文件创建和更新走 GitCode
-API v5 的仓库 contents endpoint。运行列表、手动触发、运行详情、日志读取、
-停止、重试和重新运行走配置 hostname 下的 GitCode Actions endpoint。
+流水线门禁命令使用 OpenLibing 凭据，而不是 `GITCODE_TOKEN`。`gd` 会优先读取
+`GD_OPENLIBING_TOKEN`、`GD_OPENLIBING_COOKIE` 和
+`GD_OPENLIBING_CSRF_TOKEN`；否则 `gd pipeline auth login` 会把 OpenLibing
+凭据材料保存到独立 keyring entry。OpenLibing 请求会把可用的 bearer、cookie
+和 CSRF header 发送到配置的 gateway。
+仓库门禁配置同样只面向 OpenLibing：`gd pipeline setup` 会把 GitCode 仓库
+URL、PR 接管开关、门禁自动触发开关、CodeCheck 规则集选择以及可选的公共账号
+token 材料发送给 OpenLibing。通过 `--public-token-env` 读取到的 token 只会
+进入 OpenLibing 请求体，并会从命令输出中脱敏。
+OpenLibing 仍会在服务端校验仓库维护权限。仓库新增或更新返回 `403` 时，
+表示当前账号需要项目管理员或等价项目审批人员权限，浏览器自动化不能改变该
+授权结果。
 
 ## 运行时与网络策略
 

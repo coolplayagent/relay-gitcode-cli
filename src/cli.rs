@@ -390,6 +390,14 @@ pub struct GlobalArgs {
         default_value = "https://api.gitcode.com/api/v5"
     )]
     pub api_base: String,
+    #[arg(
+        long,
+        global = true,
+        env = "GD_OPENLIBING_BASE",
+        default_value = "https://www.openlibing.com/gateway",
+        help = "OpenLibing gateway base URL for pipeline gate checks"
+    )]
+    pub openlibing_base: String,
     #[arg(long, global = true, help = "Render command output as JSON")]
     pub json: bool,
     #[arg(
@@ -850,6 +858,24 @@ pub enum PipelineCommand {
     Retry(PipelineRetryArgs),
     #[command(about = "Rerun all jobs in a GitCode workflow run")]
     Rerun(PipelineRerunArgs),
+    #[command(about = "Authenticate OpenLibing GitCode OAuth for pipeline checks")]
+    #[command(subcommand)]
+    Auth(PipelineAuthCommand),
+    #[command(about = "Show OpenLibing pipeline and CodeCheck configuration")]
+    Config(PipelineConfigArgs),
+    #[command(about = "Configure an OpenLibing GitCode repository for PR gate checks")]
+    Setup(Box<PipelineSetupArgs>),
+    #[command(about = "List GitCode pull requests known to OpenLibing")]
+    Prs(PipelinePrsArgs),
+    #[command(about = "Show OpenLibing gate checks for a pull request")]
+    Checks(PipelinePrArgs),
+    #[command(
+        name = "gate-view",
+        about = "View a GitCode pull request with OpenLibing checks"
+    )]
+    GateView(PipelinePrArgs),
+    #[command(name = "gate-runs", about = "List OpenLibing pipeline run summaries")]
+    GateRuns(PipelineGateRunsArgs),
 }
 
 #[derive(Debug, Args)]
@@ -998,6 +1024,113 @@ pub struct PipelineRerunArgs {
     #[arg(short = 'R', long = "repo")]
     pub repository: Option<String>,
     pub workflow_run_id: String,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum PipelineAuthCommand {
+    #[command(about = "Open a browser and complete OpenLibing GitCode OAuth")]
+    Login(PipelineAuthLoginArgs),
+    #[command(about = "View OpenLibing GitCode OAuth status")]
+    Status,
+    #[command(about = "Remove stored OpenLibing pipeline credentials")]
+    Logout,
+}
+
+#[derive(Debug, Args)]
+pub struct PipelineAuthLoginArgs {
+    #[arg(long, default_value = "127.0.0.1")]
+    pub callback_host: String,
+    #[arg(long, default_value_t = 0)]
+    pub callback_port: u16,
+    #[arg(long, default_value_t = 180)]
+    pub timeout_seconds: u64,
+    #[arg(long, help = "Print the OAuth URL without opening a browser")]
+    pub no_browser: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct PipelineConfigArgs {
+    #[arg(long)]
+    pub project_id: String,
+}
+
+#[derive(Debug, Args)]
+pub struct PipelineSetupArgs {
+    #[arg(long)]
+    pub project_id: String,
+    #[arg(short = 'R', long = "repo", required_unless_present = "repo_url")]
+    pub repository: Option<String>,
+    #[arg(long, required_unless_present = "repository")]
+    pub repo_url: Option<String>,
+    #[arg(long)]
+    pub repo_id: Option<u64>,
+    #[arg(long)]
+    pub repo_name: Option<String>,
+    #[arg(long)]
+    pub repo_owner: Option<String>,
+    #[arg(long, value_delimiter = ',')]
+    pub language: Vec<String>,
+    #[arg(long)]
+    pub codecheck_rule_set: Option<String>,
+    #[arg(long)]
+    pub anti_rule_set: Option<String>,
+    #[arg(long, default_value = "自研源码")]
+    pub purpose: String,
+    #[arg(long, default_value = "lead")]
+    pub open_source: String,
+    #[arg(long, default_value = "1")]
+    pub assume_pr: String,
+    #[arg(long, default_value = "1")]
+    pub auto_trigger: String,
+    #[arg(long, default_value = "0")]
+    pub auto_trigger_design_scan: String,
+    #[arg(long, default_value_t = 1)]
+    pub disallow_self_merge: u8,
+    #[arg(long, default_value_t = 0)]
+    pub disallow_unresolved_discussions_merge: u8,
+    #[arg(long)]
+    pub public_token_env: Option<String>,
+    #[arg(
+        long,
+        help = "Skip OpenLibing webhook reconfiguration after repository setup"
+    )]
+    pub no_configure_webhook: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct PipelinePrsArgs {
+    #[arg(long)]
+    pub project_id: String,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(short = 's', long)]
+    pub state: Option<String>,
+    #[arg(long, default_value_t = 1)]
+    pub page: u64,
+    #[arg(short = 'L', long = "limit", default_value_t = 20)]
+    pub limit: u64,
+}
+
+#[derive(Debug, Args)]
+pub struct PipelinePrArgs {
+    #[arg(long)]
+    pub project_id: String,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(long = "pr", alias = "mr")]
+    pub number: u64,
+}
+
+#[derive(Debug, Args)]
+pub struct PipelineGateRunsArgs {
+    #[arg(long)]
+    pub project_id: String,
+    #[arg(long)]
+    pub pipeline_name: Option<String>,
+    #[arg(long, default_value_t = 1)]
+    pub page: u64,
+    #[arg(short = 'L', long = "limit", default_value_t = 20)]
+    pub limit: u64,
 }
 
 #[derive(Debug, Args)]
@@ -1230,6 +1363,174 @@ mod tests {
                 assert_eq!(args.endpoint, "/user");
                 assert_eq!(args.raw_fields, ["a=b"]);
                 assert_eq!(args.fields, ["n=2"]);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_pipeline_auth_login() {
+        let cli = Cli::try_parse_from([
+            "gd",
+            "pipeline",
+            "auth",
+            "login",
+            "--callback-port",
+            "19090",
+            "--no-browser",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Command::Pipeline(PipelineCommand::Auth(PipelineAuthCommand::Login(args))) => {
+                assert_eq!(args.callback_port, 19090);
+                assert!(args.no_browser);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_pipeline_config() {
+        let cli =
+            Cli::try_parse_from(["gd", "pipeline", "config", "--project-id", "project-1"]).unwrap();
+
+        match cli.command {
+            Command::Pipeline(PipelineCommand::Config(args)) => {
+                assert_eq!(args.project_id, "project-1");
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_pipeline_setup() {
+        let cli = Cli::try_parse_from([
+            "gd",
+            "pipeline",
+            "setup",
+            "--project-id",
+            "project-1",
+            "--repo",
+            "owner/repo",
+            "--language",
+            "Rust,Shell",
+            "--codecheck-rule-set",
+            "default",
+            "--public-token-env",
+            "GITCODE_TOKEN",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Command::Pipeline(PipelineCommand::Setup(args)) => {
+                assert_eq!(args.project_id, "project-1");
+                assert_eq!(args.repository.as_deref(), Some("owner/repo"));
+                assert_eq!(args.language, ["Rust", "Shell"]);
+                assert_eq!(args.codecheck_rule_set.as_deref(), Some("default"));
+                assert_eq!(args.public_token_env.as_deref(), Some("GITCODE_TOKEN"));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_pipeline_prs_and_checks() {
+        let cli = Cli::try_parse_from([
+            "gd",
+            "pipeline",
+            "prs",
+            "--project-id",
+            "project-1",
+            "--repo",
+            "owner/repo",
+            "--state",
+            "open",
+            "-L",
+            "10",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Command::Pipeline(PipelineCommand::Prs(args)) => {
+                assert_eq!(args.project_id, "project-1");
+                assert_eq!(args.repository.as_deref(), Some("owner/repo"));
+                assert_eq!(args.state.as_deref(), Some("open"));
+                assert_eq!(args.limit, 10);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        let checks = Cli::try_parse_from([
+            "gd",
+            "pipeline",
+            "checks",
+            "--project-id",
+            "project-1",
+            "--repo",
+            "owner/repo",
+            "--pr",
+            "7",
+        ])
+        .unwrap();
+
+        match checks.command {
+            Command::Pipeline(PipelineCommand::Checks(args)) => {
+                assert_eq!(args.project_id, "project-1");
+                assert_eq!(args.repository.as_deref(), Some("owner/repo"));
+                assert_eq!(args.number, 7);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_pipeline_gate_runs() {
+        let cli = Cli::try_parse_from([
+            "gd",
+            "pipeline",
+            "gate-runs",
+            "--project-id",
+            "project-1",
+            "--pipeline-name",
+            "ci",
+            "--page",
+            "2",
+            "-L",
+            "20",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Command::Pipeline(PipelineCommand::GateRuns(args)) => {
+                assert_eq!(args.project_id, "project-1");
+                assert_eq!(args.pipeline_name.as_deref(), Some("ci"));
+                assert_eq!(args.page, 2);
+                assert_eq!(args.limit, 20);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_pipeline_gate_view() {
+        let view = Cli::try_parse_from([
+            "gd",
+            "pipeline",
+            "gate-view",
+            "--project-id",
+            "project-1",
+            "--repo",
+            "owner/repo",
+            "--mr",
+            "12",
+        ])
+        .unwrap();
+        match view.command {
+            Command::Pipeline(PipelineCommand::GateView(args)) => {
+                assert_eq!(args.project_id, "project-1");
+                assert_eq!(args.repository.as_deref(), Some("owner/repo"));
+                assert_eq!(args.number, 12);
             }
             other => panic!("unexpected command: {other:?}"),
         }

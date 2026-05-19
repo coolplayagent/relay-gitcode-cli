@@ -393,6 +393,399 @@ fn gd_pipeline_codecheck_creates_workflow_without_leaking_token() {
 }
 
 #[test]
+fn gd_pipeline_config_uses_openlibing_credential_without_gitcode_token() {
+    let server = MockServer::spawn(3, |request| {
+        match (request.method(), request.path_without_query()) {
+            ("GET", "/gateway/openlibing-platform-release/config/pipeline/list") => MockResponse {
+                status: 200,
+                body: r#"{"code":200,"data":[{"name":"codecheck"}]}"#,
+            },
+            (
+                "GET",
+                "/gateway/openlibing-coderepo/project-config/get-project-codecheck-rule-set",
+            ) => MockResponse {
+                status: 200,
+                body: r#"{"code":200,"data":[{"name":"default"}]}"#,
+            },
+            ("GET", "/gateway/openlibing-cicd/project/pipeline/pipeline-run/summary") => {
+                MockResponse {
+                    status: 200,
+                    body: r#"{"code":200,"data":{"passed":1}}"#,
+                }
+            }
+            _ => MockResponse {
+                status: 404,
+                body: r#"{"message":"unexpected request"}"#,
+            },
+        }
+    });
+    let config_dir = tempfile::tempdir().expect("create temporary config dir");
+
+    let mut command = gd_command();
+    let output = command
+        .env("GD_OPENLIBING_TOKEN", "openlibing-token")
+        .env("GD_CONFIG_PATH", config_dir.path().join("config.json"))
+        .arg("--openlibing-base")
+        .arg(server.base_url())
+        .args(["pipeline", "config", "--project-id", "42", "--json"])
+        .output()
+        .expect("run gd pipeline config");
+
+    let requests = server.finish();
+    assert_command_success(&output, &requests);
+    assert_eq!(requests.len(), 3);
+    assert!(requests.iter().all(|request| request.body.is_empty()));
+    assert!(
+        requests
+            .iter()
+            .all(|request| { request.header("authorization") == Some("Bearer openlibing-token") })
+    );
+    assert!(requests.iter().any(|request| {
+        request.path_without_query() == "/gateway/openlibing-platform-release/config/pipeline/list"
+            && request.path().contains("projectId=42")
+    }));
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("openlibing-token"));
+}
+
+#[test]
+fn gd_pipeline_checks_queries_openlibing_pr_gate_status() {
+    let server = MockServer::spawn(1, |request| {
+        if request.method() == "GET"
+            && request.path_without_query()
+                == "/gateway/openlibing-cicd/project/42/pr/gitcode/build-check"
+        {
+            MockResponse {
+                status: 200,
+                body: r#"{"code":200,"data":[{"name":"codecheck","status":"success"}]}"#,
+            }
+        } else {
+            MockResponse {
+                status: 404,
+                body: r#"{"message":"unexpected request"}"#,
+            }
+        }
+    });
+    let config_dir = tempfile::tempdir().expect("create temporary config dir");
+
+    let mut command = gd_command();
+    let output = command
+        .env("GD_OPENLIBING_TOKEN", "openlibing-token")
+        .env("GD_CONFIG_PATH", config_dir.path().join("config.json"))
+        .arg("--openlibing-base")
+        .arg(server.base_url())
+        .args([
+            "pipeline",
+            "checks",
+            "--project-id",
+            "42",
+            "--repo",
+            "owner/repo",
+            "--pr",
+            "7",
+            "--json",
+        ])
+        .output()
+        .expect("run gd pipeline checks");
+
+    let requests = server.finish();
+    assert_command_success(&output, &requests);
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0].header("authorization"),
+        Some("Bearer openlibing-token")
+    );
+    assert!(requests[0].path().contains("owner=owner"));
+    assert!(requests[0].path().contains("repo=repo"));
+    assert!(requests[0].path().contains("number=7"));
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("openlibing-token"));
+}
+
+#[test]
+fn gd_pipeline_checks_falls_back_to_codecheck_summary_when_cicd_is_forbidden() {
+    let server = MockServer::spawn(2, |request| {
+        match (request.method(), request.path_without_query()) {
+            ("GET", "/gateway/openlibing-cicd/project/42/pr/gitcode/build-check") => MockResponse {
+                status: 403,
+                body: r#"{"message":"forbidden"}"#,
+            },
+            (
+                "POST",
+                "/gateway/openlibing-codecheck/ci-portal/v1/codecheck/inc/v1/task/result/summary",
+            ) => MockResponse {
+                status: 200,
+                body: r#"{"code":200,"data":{"total":1,"list":[{"mrId":"7","codeCheckStatus":"Success","result":"pass"}]}}"#,
+            },
+            _ => MockResponse {
+                status: 404,
+                body: r#"{"message":"unexpected request"}"#,
+            },
+        }
+    });
+    let config_dir = tempfile::tempdir().expect("create temporary config dir");
+
+    let mut command = gd_command();
+    let output = command
+        .env("GD_OPENLIBING_TOKEN", "openlibing-token")
+        .env("GD_CONFIG_PATH", config_dir.path().join("config.json"))
+        .arg("--openlibing-base")
+        .arg(server.base_url())
+        .args([
+            "pipeline",
+            "checks",
+            "--project-id",
+            "42",
+            "--repo",
+            "owner/repo",
+            "--pr",
+            "7",
+            "--json",
+        ])
+        .output()
+        .expect("run gd pipeline checks");
+
+    let requests = server.finish();
+    assert_command_success(&output, &requests);
+    assert_eq!(requests.len(), 2);
+    let fallback = requests
+        .iter()
+        .find(|request| {
+            request.path_without_query()
+                == "/gateway/openlibing-codecheck/ci-portal/v1/codecheck/inc/v1/task/result/summary"
+        })
+        .expect("record CodeCheck fallback request");
+    let body: serde_json::Value =
+        serde_json::from_str(&fallback.body).expect("parse CodeCheck fallback body");
+    assert_eq!(body["projectId"], "42");
+    assert_eq!(body["repoName"], "repo");
+    assert_eq!(body["mrId"], "7");
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("openlibing-token"));
+}
+
+#[test]
+fn gd_pipeline_setup_configures_openlibing_repo_gate() {
+    let server = MockServer::spawn(4, |request| {
+        match (request.method(), request.path_without_query()) {
+            ("POST", "/gateway/openlibing-coderepo/project-repo/query-repo") => MockResponse {
+                status: 200,
+                body: r#"{"code":200,"data":{"list":[],"total":0}}"#,
+            },
+            (
+                "GET",
+                "/gateway/openlibing-coderepo/project-config/get-project-codecheck-rule-set",
+            ) => MockResponse {
+                status: 200,
+                body: r#"{"code":200,"data":[{"language":"Rust","templateId":"rule-1","templateName":"default"}]}"#,
+            },
+            ("POST", "/gateway/openlibing-coderepo/project-repo/add-repo") => MockResponse {
+                status: 200,
+                body: r#"{"code":200,"data":{"repoId":99}}"#,
+            },
+            ("GET", "/gateway/openlibing-coderepo/project-repo/auto-set-webhook") => MockResponse {
+                status: 200,
+                body: r#"{"code":200,"data":{"status":"configured"}}"#,
+            },
+            _ => MockResponse {
+                status: 404,
+                body: r#"{"message":"unexpected request"}"#,
+            },
+        }
+    });
+    let config_dir = tempfile::tempdir().expect("create temporary config dir");
+
+    let mut command = gd_command();
+    let output = command
+        .env("GD_OPENLIBING_TOKEN", "openlibing-token")
+        .env("PUBLIC_GITCODE_TOKEN", "repo-public-token")
+        .env("GD_CONFIG_PATH", config_dir.path().join("config.json"))
+        .arg("--openlibing-base")
+        .arg(server.base_url())
+        .args([
+            "pipeline",
+            "setup",
+            "--project-id",
+            "42",
+            "--repo",
+            "owner/repo",
+            "--repo-owner",
+            "owner",
+            "--language",
+            "Rust",
+            "--codecheck-rule-set",
+            "default",
+            "--public-token-env",
+            "PUBLIC_GITCODE_TOKEN",
+            "--json",
+        ])
+        .output()
+        .expect("run gd pipeline setup");
+
+    let requests = server.finish();
+    assert_command_success(&output, &requests);
+    assert_eq!(requests.len(), 4);
+    assert!(
+        requests
+            .iter()
+            .all(|request| { request.header("authorization") == Some("Bearer openlibing-token") })
+    );
+    let add = requests
+        .iter()
+        .find(|request| {
+            request.path_without_query() == "/gateway/openlibing-coderepo/project-repo/add-repo"
+        })
+        .expect("record add repo request");
+    let body: serde_json::Value = serde_json::from_str(&add.body).expect("parse add repo body");
+    assert_eq!(body["projectId"], "42");
+    assert_eq!(body["repoUrl"], "https://gitcode.com/owner/repo");
+    assert_eq!(body["repoName"], "repo");
+    assert_eq!(body["platform"], "gitcode");
+    assert_eq!(body["assumePr"], "1");
+    assert_eq!(body["autoTrigger"], "1");
+    assert_eq!(body["accessToken"], "repo-public-token");
+    assert_eq!(body["codecheckRuleSet"][0]["ruleSetId"], "rule-1");
+    assert!(requests.iter().any(|request| {
+        request.path_without_query() == "/gateway/openlibing-coderepo/project-repo/auto-set-webhook"
+            && request.path().contains("repoId=99")
+    }));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("openlibing-token"));
+    assert!(!stdout.contains("repo-public-token"));
+}
+
+#[test]
+fn gd_pipeline_setup_accepts_direct_rule_set_id_when_rule_list_is_forbidden() {
+    let direct_rule_id = "a39df150e7e244719d00088e310d001f";
+    let server = MockServer::spawn(4, move |request| {
+        match (request.method(), request.path_without_query()) {
+            ("POST", "/gateway/openlibing-coderepo/project-repo/query-repo") => MockResponse {
+                status: 200,
+                body: r#"{"code":200,"data":{"list":[],"total":0}}"#,
+            },
+            (
+                "GET",
+                "/gateway/openlibing-coderepo/project-config/get-project-codecheck-rule-set",
+            ) => MockResponse {
+                status: 403,
+                body: r#"{"message":"forbidden"}"#,
+            },
+            ("POST", "/gateway/openlibing-coderepo/project-repo/add-repo") => MockResponse {
+                status: 200,
+                body: r#"{"code":200,"data":{"repoId":100}}"#,
+            },
+            ("GET", "/gateway/openlibing-coderepo/project-repo/auto-set-webhook") => MockResponse {
+                status: 200,
+                body: r#"{"code":200,"data":{"status":"configured"}}"#,
+            },
+            _ => MockResponse {
+                status: 404,
+                body: r#"{"message":"unexpected request"}"#,
+            },
+        }
+    });
+    let config_dir = tempfile::tempdir().expect("create temporary config dir");
+
+    let mut command = gd_command();
+    let output = command
+        .env("GD_OPENLIBING_TOKEN", "openlibing-token")
+        .env("GD_CONFIG_PATH", config_dir.path().join("config.json"))
+        .arg("--openlibing-base")
+        .arg(server.base_url())
+        .args([
+            "pipeline",
+            "setup",
+            "--project-id",
+            "42",
+            "--repo",
+            "owner/repo",
+            "--repo-owner",
+            "owner",
+            "--language",
+            "Rust",
+            "--codecheck-rule-set",
+            direct_rule_id,
+            "--json",
+        ])
+        .output()
+        .expect("run gd pipeline setup");
+
+    let requests = server.finish();
+    assert_command_success(&output, &requests);
+    let add = requests
+        .iter()
+        .find(|request| {
+            request.path_without_query() == "/gateway/openlibing-coderepo/project-repo/add-repo"
+        })
+        .expect("record add repo request");
+    let body: serde_json::Value = serde_json::from_str(&add.body).expect("parse add repo body");
+    assert_eq!(body["codecheckRuleSet"][0]["ruleSetId"], direct_rule_id);
+}
+
+#[test]
+fn gd_pipeline_setup_explains_openlibing_repository_permission_failures() {
+    let direct_rule_id = "a39df150e7e244719d00088e310d001f";
+    let server = MockServer::spawn(3, move |request| {
+        match (request.method(), request.path_without_query()) {
+            ("POST", "/gateway/openlibing-coderepo/project-repo/query-repo") => MockResponse {
+                status: 200,
+                body: r#"{"code":200,"data":{"list":[],"total":0}}"#,
+            },
+            (
+                "GET",
+                "/gateway/openlibing-coderepo/project-config/get-project-codecheck-rule-set",
+            ) => MockResponse {
+                status: 403,
+                body: r#"{"message":"forbidden"}"#,
+            },
+            ("POST", "/gateway/openlibing-coderepo/project-repo/add-repo") => MockResponse {
+                status: 403,
+                body: r#"{"message":"forbidden"}"#,
+            },
+            _ => MockResponse {
+                status: 404,
+                body: r#"{"message":"unexpected request"}"#,
+            },
+        }
+    });
+    let config_dir = tempfile::tempdir().expect("create temporary config dir");
+
+    let mut command = gd_command();
+    let output = command
+        .env("GD_OPENLIBING_TOKEN", "openlibing-token")
+        .env("GD_CONFIG_PATH", config_dir.path().join("config.json"))
+        .arg("--openlibing-base")
+        .arg(server.base_url())
+        .args([
+            "pipeline",
+            "setup",
+            "--project-id",
+            "42",
+            "--repo",
+            "owner/repo",
+            "--repo-owner",
+            "owner",
+            "--language",
+            "Rust",
+            "--codecheck-rule-set",
+            direct_rule_id,
+            "--json",
+        ])
+        .output()
+        .expect("run gd pipeline setup");
+
+    let requests = server.finish();
+    assert!(!output.status.success());
+    assert_eq!(requests.len(), 3);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("repository add failed"), "{stderr}");
+    assert!(stderr.contains("project administrator"), "{stderr}");
+    assert!(
+        stderr.contains("repository information maintenance permission"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("PR takeover"), "{stderr}");
+    assert!(!stderr.contains("openlibing-token"));
+}
+
+#[test]
 fn gd_api_uses_http_proxy_environment() {
     let target = MockServer::spawn(0, |_| MockResponse {
         status: 500,
