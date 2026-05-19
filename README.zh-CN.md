@@ -10,11 +10,12 @@ GitCode API 文档：https://docs.gitcode.com/docs/apis/
 ## 快速开始
 
 ```bash
-cargo build
-target/debug/gd --version
-printf '%s' "$GITCODE_TOKEN" | target/debug/gd auth login --with-token
-target/debug/gd auth status
-target/debug/gd repo view owner/repo --json
+cargo install relay-gitcode-cli --force
+gd --version
+gd version check --json
+printf '%s' "$GITCODE_TOKEN" | gd auth login --with-token
+gd auth status
+gd repo view owner/repo --json
 ```
 
 `GITCODE_TOKEN` 可用于 CI 和临时端到端测试。没有环境变量 token 时，
@@ -23,7 +24,8 @@ target/debug/gd repo view owner/repo --json
 每个 GitHub Release 还会包含
 `relay-gitcode-cli-skill-<tag>.tar.gz`，这是一个纯文本、兼容 ClawHub
 的 skill，用于引导 LLM agent 通过本地 `gd` CLI 使用 GitCode API v5
-工作流。配置 `CLAWHUB_TOKEN` 后，release workflow 可以把同一个
+工作流。该 skill 应从发布包或 ClawHub 安装，不应从本地仓库 checkout
+安装。配置 `CLAWHUB_TOKEN` 后，release workflow 可以把同一个
 `skills/relay-gitcode-cli` 目录发布到 ClawHub：
 
 ```bash
@@ -72,6 +74,7 @@ gd search users query
 gd ssh-key list
 gd label list --repo owner/repo
 gd release list --repo owner/repo
+gd version check
 gd completion bash
 ```
 

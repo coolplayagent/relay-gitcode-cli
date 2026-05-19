@@ -1,6 +1,10 @@
 ---
 name: relay-gitcode-cli
-description: Use gd, the relay-gitcode-cli GitCode command line client, for GitCode API v5 workflows including authentication, repositories, pull requests, issues, search, SSH keys, labels, releases, GitCode Pipeline operations, raw API calls, JSON automation, and shell completion. Use when an agent should operate GitCode by running local gd commands. Do not use this skill for GitHub-only gh surfaces unless GitCode exposes an equivalent API through gd or gd api.
+description: Use gd, the relay-gitcode-cli GitCode command line client, for GitCode API v5 workflows including authentication, repositories, pull requests, issues, search, SSH keys, labels, releases, GitCode Pipeline operations, raw API calls, JSON automation, version checks, and shell completion. Use when an agent should operate GitCode by running local gd commands. Do not use this skill for GitHub-only gh surfaces unless GitCode exposes an equivalent API through gd or gd api.
+metadata:
+  openclaw:
+    skillKey: relay-gitcode-cli
+    homepage: https://github.com/coolplayagent/relay-gitcode-cli
 ---
 
 # Relay GitCode CLI
@@ -28,8 +32,21 @@ Check whether `gd` exists, then inspect version and authentication state:
 ```bash
 command -v gd
 gd --version
+gd version check --json
 gd auth status --json
 ```
+
+For online install or upgrades, use a released artifact. Prefer the Rust
+package first and GitHub Releases second:
+
+```bash
+cargo install relay-gitcode-cli --force
+gd version check --json
+```
+
+Do not install this skill by building `gd` from a local repository checkout.
+The skill is published independently and should point agents at released CLI
+artifacts.
 
 For temporary CI or end-to-end tests, prefer `GITCODE_TOKEN` in the process
 environment. For interactive token login, read the token from stdin and store it

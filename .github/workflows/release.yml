@@ -100,7 +100,9 @@ jobs:
           test -f "skills/${SKILL_NAME}/agents/openai.yaml"
           test -f "skills/${SKILL_NAME}/references/cli-workflows.md"
           grep -q '^name: relay-gitcode-cli$' "skills/${SKILL_NAME}/SKILL.md"
+          grep -q 'homepage: https://github.com/coolplayagent/relay-gitcode-cli' "skills/${SKILL_NAME}/SKILL.md"
           grep -q 'GITCODE_TOKEN' "skills/${SKILL_NAME}/SKILL.md"
+          grep -q 'gd version check --json' "skills/${SKILL_NAME}/SKILL.md"
           grep -q 'gd api /user --json' "skills/${SKILL_NAME}/SKILL.md"
           grep -q 'Do not use this skill for GitHub-only' "skills/${SKILL_NAME}/SKILL.md"
           grep -q 'default_prompt: "Use \$relay-gitcode-cli' "skills/${SKILL_NAME}/agents/openai.yaml"
@@ -276,15 +278,45 @@ jobs:
       - name: Publish crate to crates.io
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ needs.verify.outputs.version }}"
+          published="$(python3 - "$version" <<'PY'
+          import json
+          import sys
+          import urllib.error
+          import urllib.request
+
+          version = sys.argv[1]
+          try:
+              with urllib.request.urlopen("https://crates.io/api/v1/crates/relay-gitcode-cli", timeout=30) as response:
+                  payload = json.load(response)
+          except urllib.error.HTTPError as error:
+              if error.code == 404:
+                  print(False)
+                  raise SystemExit(0)
+              raise
+
+          print(any(item["num"] == version for item in payload["versions"]))
+          PY
+          )"
+
+          if [[ "$published" == "True" ]]; then
+            echo "relay-gitcode-cli $version is already published on crates.io; skipping."
+            exit 0
+          fi
+
+          cargo publish
 
   release:
     name: Publish GitHub Release
-    if: github.event_name == 'push'
+    if: always() && github.event_name == 'push' && needs.verify.result == 'success' && needs.build.result == 'success' && needs.skill.result == 'success' && (needs.publish-crate.result == 'success' || needs.publish-crate.result == 'skipped')
     needs:
       - verify
       - build
       - skill
+      - publish-crate
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -304,6 +336,53 @@ jobs:
           set -euo pipefail
           cd dist
           sha256sum * > checksums.txt
+          cat checksums.txt
+
+      - name: Generate release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > release-notes.md <<'NOTES'
+          ## Install
+
+          Download the archive for your platform from this release, verify it with `checksums.txt`, and place the `gd` binary on your PATH.
+
+          Rust users can install from crates.io after the crate is published:
+
+          ```bash
+          cargo install relay-gitcode-cli --force
+          gd --version
+          gd version check
+          ```
+
+          ## CLI Skill
+
+          This release includes `relay-gitcode-cli-skill-${{ needs.verify.outputs.tag }}.tar.gz`, a ClawHub-compatible skill that teaches LLM agents to use the released `gd` CLI for GitCode API v5 workflows.
+
+          Registry maintainers can publish the same skill directory with:
+
+          ```bash
+          clawhub publish skills/relay-gitcode-cli --slug relay-gitcode-cli --name "Relay GitCode CLI" --version ${{ needs.verify.outputs.version }}
+          ```
+
+          ## Verification
+
+          ```bash
+          sha256sum -c checksums.txt
+          gd --version
+          gd version check --json
+          gd auth status --json
+          ```
+
+          ## Platform Artifacts
+
+          - Linux x64: `x86_64-unknown-linux-gnu`
+          - Linux ARM64: `aarch64-unknown-linux-gnu`
+          - macOS Intel: `x86_64-apple-darwin`
+          - macOS Apple Silicon: `aarch64-apple-darwin`
+          - Windows x64: `x86_64-pc-windows-msvc`
+          - Windows ARM64: `aarch64-pc-windows-msvc`
+          NOTES
 
       - name: Create GitHub Release
         env:
@@ -311,15 +390,27 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          prerelease_flag=()
+          tag="${{ needs.verify.outputs.tag }}"
+          prerelease_args=()
           if [[ "${{ needs.verify.outputs.prerelease }}" == "true" ]]; then
-            prerelease_flag=(--prerelease)
+            prerelease_args+=(--prerelease)
           fi
-          gh release create "${{ needs.verify.outputs.tag }}" dist/* \
+
+          if gh release view "$tag" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release edit "$tag" \
+              --repo "${{ github.repository }}" \
+              --title "gd $tag" \
+              --notes-file release-notes.md \
+              "${prerelease_args[@]}"
+            gh release upload "$tag" --repo "${{ github.repository }}" --clobber dist/*
+            exit 0
+          fi
+
+          gh release create "$tag" dist/* \
             --repo "${{ github.repository }}" \
-            --title "gd ${{ needs.verify.outputs.tag }}" \
-            --notes "Prebuilt gd archives for Linux, macOS, and Windows. This release also includes ${{ env.SKILL_NAME }}-skill-${{ needs.verify.outputs.tag }}.tar.gz for ClawHub-compatible CLI skill publishing." \
-            "${prerelease_flag[@]}"
+            --title "gd $tag" \
+            --notes-file release-notes.md \
+            "${prerelease_args[@]}"
 
   publish-skill:
     name: Publish ClawHub skill

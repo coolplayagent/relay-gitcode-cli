@@ -6,6 +6,7 @@ mod config;
 mod output;
 mod pipeline;
 mod repo;
+mod update;
 
 use anyhow::Context;
 use clap::{

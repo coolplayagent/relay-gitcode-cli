@@ -439,6 +439,9 @@ pub enum Command {
     #[command(about = "Manage GitCode pipelines", visible_alias = "actions")]
     #[command(subcommand)]
     Pipeline(PipelineCommand),
+    #[command(about = "Inspect gd version and updates")]
+    #[command(subcommand)]
+    Version(VersionCommand),
     #[command(about = "Generate shell completion scripts")]
     Completion(CompletionArgs),
 }
@@ -454,6 +457,15 @@ pub enum AuthCommand {
     #[command(about = "Print the stored authentication token")]
     Token(AuthHostArgs),
 }
+
+#[derive(Debug, Subcommand)]
+pub enum VersionCommand {
+    #[command(about = "Check whether a newer gd release is available")]
+    Check(VersionCheckArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct VersionCheckArgs {}
 
 #[derive(Debug, Args)]
 pub struct AuthLoginArgs {
@@ -950,6 +962,16 @@ mod tests {
         let cli = Cli::try_parse_from(["gd", "--format", "json", "repo", "list", "owner"]).unwrap();
         assert_eq!(cli.global.format, Some(CliOutputFormat::Json));
         assert!(cli.global.json_output());
+    }
+
+    #[test]
+    fn parses_version_check_without_auth_context() {
+        let cli = Cli::try_parse_from(["gd", "version", "check", "--json"]).unwrap();
+        assert!(cli.global.json_output());
+        match cli.command {
+            Command::Version(VersionCommand::Check(_)) => {}
+            other => panic!("unexpected command: {other:?}"),
+        }
     }
 
     #[test]

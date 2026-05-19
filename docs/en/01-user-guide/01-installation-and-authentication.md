@@ -1,13 +1,22 @@
 # Chapter 1: Installation and Authentication
 
-## Build From Source
+## Install From Release
+
+Rust users can install or upgrade the released CLI with:
 
 ```bash
-cargo build
-target/debug/gd --version
+cargo install relay-gitcode-cli --force
+gd --version
+gd version check --json
 ```
 
-For an optimized binary:
+You can also download a platform archive from GitHub Releases and place the
+`gd` binary on your `PATH`. `gd version check` reports available stable
+versions from GitHub Releases and crates.io; it does not replace the binary.
+
+## Build From Source
+
+For local development:
 
 ```bash
 ./build.sh

@@ -76,10 +76,22 @@ gd search users query
 gd ssh-key list
 gd label list --repo owner/repo
 gd release list --repo owner/repo
+gd version check
 ```
 
 GitHub-only surfaces such as codespaces, gists, GitHub Actions workflows,
 projects, rulesets, extensions, and Copilot are intentionally excluded.
+
+## Version Checks
+
+```bash
+gd version check
+gd version check --json
+```
+
+`gd version check` reads GitHub Releases and crates.io to report whether a
+newer stable `relay-gitcode-cli` release is available. It does not replace the
+current binary.
 
 ## Skill-over-CLI
 
@@ -92,3 +104,6 @@ operations, raw `gd api` calls, and shell completion.
 The skill intentionally stays within GitCode-backed `gd` behavior. It does not
 add GitHub-only `gh` command surfaces unless GitCode exposes an equivalent API
 that can be reached through `gd api`.
+
+Install the skill from its published release artifact or ClawHub package. Do
+not install it by building `gd` from a local repository checkout.

@@ -9,11 +9,11 @@ use crate::{
     cli::{
         AuthCommand, Cli, Command, CompletionArgs, IssueCommand, LabelCommand, PipelineCommand,
         PipelineSetMode, PrCommand, ReleaseCommand, RepoCommand, SearchCommand, Shell,
-        SshKeyCommand,
+        SshKeyCommand, VersionCommand,
     },
     client::{ApiRequest, GitcodeClient, form_body, merge_pages, query},
     config::Config,
-    output::print_value,
+    output::{print_json, print_value},
     pipeline::{
         PipelineClient, WorkflowDispatchRequest, WorkflowFileRequest, WorkflowListRequest,
         WorkflowRunListRequest, actions_api_base_from_hostname, extract_log_text,
@@ -21,6 +21,7 @@ use crate::{
         workflow_file_body,
     },
     repo,
+    update::{UpdateConfig, check_for_updates, render_version_check_text},
 };
 
 pub async fn run(
@@ -31,6 +32,7 @@ pub async fn run(
     let json_output = cli.global.json_output();
     match cli.command {
         Command::Completion(args) => completion(args),
+        Command::Version(command) => version(command, json_output).await,
         Command::Auth(command) => auth(command, &mut config, credentials, json_output).await,
         other => {
             let token = credentials.get_token(&config.hostname)?;
@@ -80,7 +82,22 @@ pub async fn run(
                 Command::Pipeline(command) => {
                     pipeline_command(command, &config, &client, token, json_output).await
                 }
-                Command::Completion(_) | Command::Auth(_) => unreachable!(),
+                Command::Completion(_) | Command::Version(_) | Command::Auth(_) => unreachable!(),
+            }
+        }
+    }
+}
+
+async fn version(command: VersionCommand, json_output: bool) -> anyhow::Result<()> {
+    match command {
+        VersionCommand::Check(_) => {
+            let config = UpdateConfig::from_environment()?;
+            let response = check_for_updates(&config).await;
+            if json_output {
+                print_json(&response)
+            } else {
+                print!("{}", render_version_check_text(&response));
+                Ok(())
             }
         }
     }

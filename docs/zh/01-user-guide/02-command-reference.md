@@ -72,10 +72,21 @@ gd search users query
 gd ssh-key list
 gd label list --repo owner/repo
 gd release list --repo owner/repo
+gd version check
 ```
 
 codespaces、gists、GitHub Actions workflows、projects、rulesets、extensions、
 Copilot 等 GitHub 专属命令不会进入 `gd`。
+
+## 版本检查
+
+```bash
+gd version check
+gd version check --json
+```
+
+`gd version check` 会读取 GitHub Releases 和 crates.io，报告是否存在更新的
+稳定版 `relay-gitcode-cli`。它不会替换当前二进制。
 
 ## Skill-over-CLI
 
@@ -86,3 +97,6 @@ Pipeline、原始 `gd api` 调用和 shell completion。
 
 该 skill 只保持在 GitCode 支持的 `gd` 行为范围内。除非 GitCode 提供可通过
 `gd api` 访问的等价 API，否则它不会增加 GitHub 专属的 `gh` 命令面。
+
+请从发布产物或 ClawHub package 安装该 skill，不要通过本地仓库 checkout
+构建 `gd` 来安装 skill。

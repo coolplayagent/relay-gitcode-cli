@@ -13,12 +13,17 @@
 
 ## Installation and Authentication
 
-Build locally from the repository when a released binary is not available:
+Install and upgrade from released artifacts. Prefer the Rust package first and
+GitHub Releases second:
 
 ```bash
-cargo build
-target/debug/gd --version
+cargo install relay-gitcode-cli --force
+gd --version
+gd version check --json
 ```
+
+Do not install from a local repository checkout as part of this skill workflow.
+The skill is independently published and should use the released `gd` CLI.
 
 Use `GITCODE_TOKEN` for temporary automation and CI:
 

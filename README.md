@@ -11,11 +11,12 @@ GitCode API documentation: https://docs.gitcode.com/docs/apis/
 ## Quick Start
 
 ```bash
-cargo build
-target/debug/gd --version
-printf '%s' "$GITCODE_TOKEN" | target/debug/gd auth login --with-token
-target/debug/gd auth status
-target/debug/gd repo view owner/repo --json
+cargo install relay-gitcode-cli --force
+gd --version
+gd version check --json
+printf '%s' "$GITCODE_TOKEN" | gd auth login --with-token
+gd auth status
+gd repo view owner/repo --json
 ```
 
 `GITCODE_TOKEN` is also accepted directly for CI and temporary end-to-end tests.
@@ -25,8 +26,10 @@ token in the system keyring.
 Each GitHub Release also includes
 `relay-gitcode-cli-skill-<tag>.tar.gz`, a text-only ClawHub-compatible skill
 that teaches LLM agents to use the local `gd` CLI for GitCode API v5 workflows.
-The release workflow can publish the same `skills/relay-gitcode-cli` directory
-to ClawHub when `CLAWHUB_TOKEN` is configured:
+The skill is installed from published releases or ClawHub, not from a local
+repository checkout. The release workflow can publish the same
+`skills/relay-gitcode-cli` directory to ClawHub when `CLAWHUB_TOKEN` is
+configured:
 
 ```bash
 clawhub publish skills/relay-gitcode-cli \
@@ -74,6 +77,7 @@ gd search users query
 gd ssh-key list
 gd label list --repo owner/repo
 gd release list --repo owner/repo
+gd version check
 gd completion bash
 ```
 
