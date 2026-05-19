@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, path::Path};
 
 use anyhow::{Context, bail};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
-use reqwest::{Method, StatusCode};
+use reqwest::{Method, StatusCode, header};
 use serde_json::{Map, Value, json};
 use url::Url;
 
@@ -48,6 +48,15 @@ pub struct WorkflowDispatchRequest {
     pub branch_commit_id: Option<String>,
     pub repo_id: Option<String>,
     pub inputs: Map<String, Value>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CodecheckWorkflowRequest {
+    pub name: String,
+    pub repo_url: String,
+    pub branch: String,
+    pub languages: Vec<String>,
+    pub access_token_secret: String,
 }
 
 impl PipelineClient {
@@ -200,6 +209,7 @@ impl PipelineClient {
         }
 
         let mut builder = self.http.request(method, url);
+        builder = builder.header(header::REFERER, self.api_base.as_str());
         if let Some(token) = &self.token {
             builder = builder.bearer_auth(token);
         }
@@ -251,6 +261,49 @@ pub fn workflow_file_body(request: WorkflowFileRequest) -> Value {
     insert_opt(&mut body, "branch", request.branch);
     insert_opt(&mut body, "sha", request.sha);
     json!(body)
+}
+
+pub fn codecheck_workflow_content(request: CodecheckWorkflowRequest) -> anyhow::Result<String> {
+    let languages = normalize_codecheck_languages(request.languages)?;
+    validate_codecheck_secret_name(&request.access_token_secret)?;
+    let rule_sets = languages
+        .into_iter()
+        .map(|language| json!({ "language": language }))
+        .collect::<Vec<_>>();
+    let rule_sets = serde_json::to_string(&rule_sets)?;
+    let access_token = format!("${{{{ secrets.{} }}}}", request.access_token_secret);
+    let name = yaml_quote(&request.name);
+    let trigger_branch = yaml_quote(&request.branch);
+    let fallback_repo_url = github_expression_string_literal(&request.repo_url);
+    let rule_sets = yaml_quote(&rule_sets);
+    let access_token = yaml_quote(&access_token);
+    let codecheck_repo_url =
+        format!("${{{{ github.event.pull_request.head.repo.clone_url || {fallback_repo_url} }}}}");
+    let codecheck_branch = "${{ github.head_ref || github.ref_name }}";
+
+    Ok(format!(
+        "\
+name: {name}
+
+on:
+  push:
+    branches: [ {trigger_branch} ]
+  pull_request:
+    branches: [ {trigger_branch} ]
+
+jobs:
+  build:
+    runs-on: euleros-2.10.1
+    steps:
+      - name: codecheck-action-task
+        uses: codecheck-action@0.0.3
+        with:
+          repo_url: {codecheck_repo_url}
+          branch: {codecheck_branch}
+          rule_sets: {rule_sets}
+          access_token: {access_token}
+"
+    ))
 }
 
 pub fn validate_file_content_source(
@@ -383,6 +436,68 @@ fn insert_opt(body: &mut BTreeMap<&'static str, Value>, key: &'static str, value
     }
 }
 
+fn normalize_codecheck_languages(values: Vec<String>) -> anyhow::Result<Vec<String>> {
+    let values = if values.is_empty() {
+        vec!["SHELL".to_string()]
+    } else {
+        values
+    };
+    values
+        .into_iter()
+        .map(|value| {
+            let language = value.trim().to_ascii_uppercase();
+            if CODECHECK_LANGUAGES.contains(&language.as_str()) {
+                Ok(language)
+            } else {
+                bail!(
+                    "unsupported CodeCheck language: {value}; supported languages: {}",
+                    CODECHECK_LANGUAGES.join(", ")
+                );
+            }
+        })
+        .collect()
+}
+
+const CODECHECK_LANGUAGES: &[&str] = &[
+    "JAVA",
+    "C++",
+    "C",
+    "TYPESCRIPT",
+    "CANGJIE",
+    "RUST",
+    "ARKTS",
+    "CSS",
+    "GO",
+    "HTML",
+    "JAVASCRIPT",
+    "KOTLIN",
+    "LUA",
+    "PHP",
+    "PYTHON",
+    "SCALA",
+    "SHELL",
+    "SQL",
+];
+
+fn validate_codecheck_secret_name(value: &str) -> anyhow::Result<()> {
+    if value.trim().is_empty()
+        || !value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+    {
+        bail!("CodeCheck access token secret name must contain only letters, digits, and '_'");
+    }
+    Ok(())
+}
+
+fn yaml_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
+
+fn github_expression_string_literal(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
+
 fn parse_input_value(value: &str) -> Value {
     serde_json::from_str(value).unwrap_or_else(|_| Value::String(value.to_string()))
 }
@@ -470,6 +585,54 @@ mod tests {
         assert_eq!(body["page"], 2);
         assert_eq!(body["per_page"], 20);
         assert!(body.get("branch").is_none());
+    }
+
+    #[test]
+    fn codecheck_workflow_uses_secret_reference() {
+        let content = codecheck_workflow_content(CodecheckWorkflowRequest {
+            name: "codecheck-pipeline".to_string(),
+            repo_url: "https://gitcode.com/owner/repo.git".to_string(),
+            branch: "main".to_string(),
+            languages: vec!["shell".to_string(), "Rust".to_string()],
+            access_token_secret: "CODECHECK_TOKEN".to_string(),
+        })
+        .unwrap();
+
+        assert!(content.contains("uses: codecheck-action@0.0.3"));
+        assert!(content.contains(
+            "repo_url: ${{ github.event.pull_request.head.repo.clone_url || 'https://gitcode.com/owner/repo.git' }}"
+        ));
+        assert!(
+            content.contains("rule_sets: '[{\"language\":\"SHELL\"},{\"language\":\"RUST\"}]'")
+        );
+        assert!(content.contains("branches: [ 'main' ]"));
+        assert!(content.contains("branch: ${{ github.head_ref || github.ref_name }}"));
+        assert!(content.contains("access_token: '${{ secrets.CODECHECK_TOKEN }}'"));
+        assert!(!content.contains("integration-token"));
+    }
+
+    #[test]
+    fn codecheck_workflow_rejects_invalid_language_and_secret() {
+        assert!(
+            codecheck_workflow_content(CodecheckWorkflowRequest {
+                name: "codecheck-pipeline".to_string(),
+                repo_url: "https://gitcode.com/owner/repo.git".to_string(),
+                branch: "main".to_string(),
+                languages: vec!["brainfuck".to_string()],
+                access_token_secret: "CODECHECK_TOKEN".to_string(),
+            })
+            .is_err()
+        );
+        assert!(
+            codecheck_workflow_content(CodecheckWorkflowRequest {
+                name: "codecheck-pipeline".to_string(),
+                repo_url: "https://gitcode.com/owner/repo.git".to_string(),
+                branch: "main".to_string(),
+                languages: vec!["SHELL".to_string()],
+                access_token_secret: "bad-secret".to_string(),
+            })
+            .is_err()
+        );
     }
 
     #[test]

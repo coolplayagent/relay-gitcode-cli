@@ -114,6 +114,14 @@ gd pr create \
   --json
 ```
 
+List, add, and reply to Pull Request review comments:
+
+```bash
+gd pr comments 1 --repo owner/repo --limit 50 --json
+gd pr comment 1 --repo owner/repo --body "please fix" --path src/main.rs --position 3 --need-to-resolve --json
+gd pr reply 1 discussion-id --repo owner/repo --body "fixed" --json
+```
+
 `gd mr` is a visible alias for `gd pr`. Prefer `gd pr` in reusable
 documentation unless the user specifically requests merge-request naming.
 
@@ -202,6 +210,22 @@ gd pipeline set \
   --file workflow.yml \
   --json
 ```
+
+Create a GitCode CodeCheck workflow. Configure the named project secret in
+GitCode first; the generated workflow references the secret expression and does
+not commit a token value:
+
+```bash
+gd pipeline codecheck \
+  --repo owner/repo \
+  --language SHELL \
+  --access-token-secret CODECHECK_ACCESS_TOKEN \
+  --json
+```
+
+The generated workflow filters push and pull request events by the configured
+target branch, then passes the pull request source repository and branch or the
+current push repository/ref to `codecheck-action@0.0.3`.
 
 Run and inspect pipelines:
 

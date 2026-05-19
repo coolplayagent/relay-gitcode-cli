@@ -16,10 +16,10 @@ use crate::{
     config::Config,
     output::{print_json, print_value},
     pipeline::{
-        PipelineClient, WorkflowDispatchRequest, WorkflowFileRequest, WorkflowListRequest,
-        WorkflowRunListRequest, actions_api_base_from_hostname, extract_log_text,
-        parse_key_value_inputs, validate_file_content_source, validate_workflow_path,
-        workflow_file_body,
+        CodecheckWorkflowRequest, PipelineClient, WorkflowDispatchRequest, WorkflowFileRequest,
+        WorkflowListRequest, WorkflowRunListRequest, actions_api_base_from_hostname,
+        codecheck_workflow_content, extract_log_text, parse_key_value_inputs,
+        validate_file_content_source, validate_workflow_path, workflow_file_body,
     },
     repo,
     update::{UpdateConfig, check_for_updates, render_version_check_text},
@@ -363,6 +363,61 @@ async fn pr_command(
                 .await?;
             print_value(json_output, &value)
         }
+        PrCommand::Comments(args) => {
+            let repository =
+                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())
+                    .await?;
+            let value = client
+                .get(
+                    &format!("repos/{repository}/pulls/{}/comments", args.number),
+                    &[
+                        ("page", args.page.to_string()),
+                        ("per_page", args.limit.to_string()),
+                    ],
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        PrCommand::Comment(args) => {
+            let repository =
+                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())
+                    .await?;
+            let mut body = serde_json::Map::new();
+            body.insert("body".to_string(), Value::String(args.body));
+            if let Some(path) = args.path {
+                body.insert("path".to_string(), Value::String(path));
+            }
+            if let Some(position) = args.position {
+                body.insert("position".to_string(), Value::from(position));
+            }
+            body.insert(
+                "need_to_resolve".to_string(),
+                Value::Bool(args.need_to_resolve),
+            );
+            let value = client
+                .post(
+                    &format!("repos/{repository}/pulls/{}/comments", args.number),
+                    &Value::Object(body),
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        PrCommand::Reply(args) => {
+            let repository =
+                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())
+                    .await?;
+            let body = json!({ "body": args.body });
+            let value = client
+                .post(
+                    &format!(
+                        "repos/{repository}/pulls/{}/discussions/{}/comments",
+                        args.number, args.discussion_id
+                    ),
+                    &body,
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
     }
 }
 
@@ -563,6 +618,48 @@ async fn pipeline_command(
                 content,
                 message: args.message,
                 branch: args.branch,
+                sha: args.sha,
+            });
+            let endpoint = format!("repos/{repository}/contents/{path}");
+            let value = match args.mode {
+                PipelineSetMode::Create => api_client.post(&endpoint, &body).await?,
+                PipelineSetMode::Update => api_client.put(&endpoint, &body).await?,
+            };
+            print_value(json_output, &value)
+        }
+        PipelineCommand::Codecheck(args) => {
+            let repository =
+                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())
+                    .await?;
+            let path = args.path.trim_start_matches('/').to_string();
+            validate_workflow_path(&path)?;
+            if args.mode == PipelineSetMode::Update
+                && args
+                    .sha
+                    .as_deref()
+                    .filter(|value| !value.is_empty())
+                    .is_none()
+            {
+                bail!("--sha is required when --mode update is used");
+            }
+            let repo_value = api_client.get(&format!("repos/{repository}"), &[]).await?;
+            let default_branch = string_field(&repo_value, &["default_branch"])
+                .unwrap_or_else(|| "main".to_string());
+            let repo_url = args
+                .repo_url
+                .or_else(|| string_field(&repo_value, &["http_url_to_repo", "clone_url"]))
+                .unwrap_or_else(|| repo::clone_url(&config.hostname, &repository));
+            let content = codecheck_workflow_content(CodecheckWorkflowRequest {
+                name: args.name,
+                repo_url,
+                branch: args.check_branch.unwrap_or(default_branch),
+                languages: args.languages,
+                access_token_secret: args.access_token_secret,
+            })?;
+            let body = workflow_file_body(WorkflowFileRequest {
+                content,
+                message: args.message,
+                branch: args.commit_branch,
                 sha: args.sha,
             });
             let endpoint = format!("repos/{repository}/contents/{path}");

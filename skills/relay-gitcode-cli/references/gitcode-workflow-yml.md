@@ -60,6 +60,21 @@ jobs:
           ls
 ```
 
+## CodeCheck
+
+Use `gd pipeline codecheck` to generate this workflow so the personal access
+token is referenced through a project secret instead of committed as a literal
+value:
+
+```bash
+gd pipeline codecheck --repo owner/repo --language SHELL --access-token-secret CODECHECK_ACCESS_TOKEN --json
+```
+
+The generated workflow uses `codecheck-action@0.0.3` with `repo_url`,
+`branch`, `rule_sets`, and `access_token` inputs as documented by GitCode
+CodeCheck. Pull request runs pass the PR source repository and branch to
+CodeCheck; push runs pass the configured repository URL and current ref.
+
 ## Rust CLI CI
 
 Use this shape for Rust command line projects. It installs stable Rust inside

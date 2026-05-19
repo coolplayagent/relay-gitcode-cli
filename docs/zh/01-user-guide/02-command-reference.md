@@ -38,6 +38,9 @@ gd issue comment 1 --repo owner/repo --body "thanks"
 gd pr list --repo owner/repo
 gd pr view 1 --repo owner/repo
 gd pr create --repo owner/repo --title "change" --body "details" --base main --head feature
+gd pr comments 1 --repo owner/repo --limit 50
+gd pr comment 1 --repo owner/repo --body "please fix" --path src/main.rs --position 3 --need-to-resolve
+gd pr reply 1 discussion-id --repo owner/repo --body "fixed"
 ```
 
 ## GitCode 流水线命令
@@ -49,6 +52,7 @@ AK/SK。`gd actions` 可作为 `gd pipeline` 的别名。
 
 ```bash
 gd pipeline set --repo owner/repo .gitcode/workflows/ci.yml --file workflow.yml
+gd pipeline codecheck --repo owner/repo --language SHELL --access-token-secret CODECHECK_ACCESS_TOKEN
 gd pipeline set --repo owner/repo .gitcode/workflows/ci.yml --mode update --sha file-sha --file workflow.yml
 gd pipeline list --repo owner/repo
 gd pipeline run --repo owner/repo workflow-id --file-path .gitcode/workflows/ci.yml --branch main --input dry_run=true
@@ -61,7 +65,12 @@ gd pipeline rerun --repo owner/repo workflow-run-id
 ```
 
 `gd pipeline set` 通过 GitCode 仓库 contents API 写入 workflow YAML。
-`gd pipeline log` 默认输出原始日志文本；添加 `--json` 可保留完整响应结构。
+`gd pipeline codecheck` 会写入 `.gitcode/workflows/codecheck.yml`，使用
+`codecheck-action@0.0.3`，并引用配置的 secret 名称而不是把个人访问 token
+写进仓库。生成的 CodeCheck action 会在 pull request 事件中检查源分支，在
+pull request 来自 fork 时也会使用源仓库 URL；push 事件会检查配置的仓库 URL
+和当前 ref。`gd pipeline log` 默认输出原始日志文本；添加
+`--json` 可保留完整响应结构。
 
 ## 其他 GitCode 资源
 

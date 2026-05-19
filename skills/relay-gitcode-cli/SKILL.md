@@ -94,6 +94,9 @@ gd issue comment 1 --repo owner/repo --body "thanks" --json
 gd pr list --repo owner/repo --state open --base main --json
 gd pr view 1 --repo owner/repo --json
 gd pr create --repo owner/repo --title "change" --body "details" --base main --head feature --json
+gd pr comments 1 --repo owner/repo --limit 50 --json
+gd pr comment 1 --repo owner/repo --body "please fix" --path src/main.rs --position 3 --need-to-resolve --json
+gd pr reply 1 discussion-id --repo owner/repo --body "fixed" --json
 ```
 
 Use `gd api` for GitCode API v5 endpoints that do not have first-class
@@ -114,6 +117,7 @@ Do not configure or ask for AK/SK credentials for pipeline workflows.
 
 ```bash
 gd pipeline set --repo owner/repo .gitcode/workflows/ci.yml --file workflow.yml --json
+gd pipeline codecheck --repo owner/repo --language SHELL --access-token-secret CODECHECK_ACCESS_TOKEN --json
 gd pipeline run --repo owner/repo workflow-id --file-path .gitcode/workflows/ci.yml --branch main --json
 gd pipeline runs --repo owner/repo --workflow-name ci --status success --json
 gd pipeline view --repo owner/repo workflow-run-id --json
