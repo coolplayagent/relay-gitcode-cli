@@ -8,9 +8,16 @@ behavior.
 ```bash
 gd auth login --with-token
 gd auth status --json
+gd auth status --format json
 gd api /user --json
 gd completion bash
 ```
+
+`--json` and `--format json` both render successful command output as JSON.
+When command parsing fails and either flag is present, `gd` writes a single-line
+JSON diagnostic to stderr with `error`, `matched_path`, `unexpected_token`,
+`expected`, `suggestion`, and `usage` fields. Text diagnostics include best-effort
+`Try:` and `Usage:` lines.
 
 ## Repository Commands
 
@@ -37,27 +44,28 @@ gd pr create --repo owner/repo --title "change" --body "details" --base main --h
 
 ## GitCode Pipeline Commands
 
-Pipeline commands call the CodeArts Pipeline GitCode APIs. Set
-`GITCODE_PIPELINE_API_BASE` to the region endpoint, such as
-`https://devcloud.ap-southeast-3.myhuaweicloud.com`, and set
-`GITCODE_PIPELINE_DOMAIN_ID` to the tenant domain ID. AK/SK signing is preferred
-with `HUAWEICLOUD_SDK_AK`/`HUAWEICLOUD_SDK_SK` or
-`CLOUD_SDK_AK`/`CLOUD_SDK_SK`; when AK/SK is not configured, `gd` falls back to
-the stored GitCode token as a Bearer token.
+Pipeline commands manage GitCode workflow files under `.gitcode/workflows` and
+read GitCode Actions run records and logs. They use the same GitCode personal
+access token as other commands through `GITCODE_TOKEN` or
+`gd auth login --with-token`; no AK/SK credentials are required. `gd actions`
+is available as an alias for `gd pipeline`.
 
 ```bash
-gd pipeline register --repo owner/repo --type create --new-file-path .gitcode/workflows/ci.yml --file workflow.yml
-gd pipeline run --repo owner/repo --file-path .gitcode/workflows/ci.yml --branch main
-gd pipeline runs --repo owner/repo --pipeline-name ci --status success
-gd pipeline view pipeline-id pipeline-run-id
-gd pipeline log pipeline-id pipeline-run-id job-run-id
-gd pipeline stop pipeline-id pipeline-run-id
-gd pipeline retry pipeline-id pipeline-run-id
+gd pipeline set --repo owner/repo .gitcode/workflows/ci.yml --file workflow.yml
+gd pipeline set --repo owner/repo .gitcode/workflows/ci.yml --mode update --sha file-sha --file workflow.yml
+gd pipeline list --repo owner/repo
+gd pipeline run --repo owner/repo workflow-id --file-path .gitcode/workflows/ci.yml --branch main --input dry_run=true
+gd pipeline runs --repo owner/repo --workflow-name ci --status success
+gd pipeline view --repo owner/repo workflow-run-id
+gd pipeline log --repo owner/repo workflow-run-id job-id
+gd pipeline stop --repo owner/repo workflow-run-id
+gd pipeline retry --repo owner/repo workflow-run-id --job-run-id job-id
+gd pipeline rerun --repo owner/repo workflow-run-id
 ```
 
-Use `--pipeline-api-base` and `--pipeline-domain-id` to override the environment
-for one command. `gd pipeline log` prints raw log text by default; add `--json`
-to keep the full response envelope.
+`gd pipeline set` writes workflow YAML through the GitCode repository contents
+API. `gd pipeline log` prints raw log text by default; add `--json` to keep the
+full response envelope.
 
 ## Other GitCode Resources
 

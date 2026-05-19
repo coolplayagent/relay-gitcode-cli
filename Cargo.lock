@@ -2756,19 +2756,17 @@ name = "relay-gitcode-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64",
  "clap",
  "clap_complete",
  "dirs",
- "hmac",
  "keyring",
  "keyring-core",
  "reqwest",
  "serde",
  "serde_json",
- "sha2",
  "tempfile",
  "thiserror 2.0.18",
- "time",
  "tokio",
  "url",
 ]

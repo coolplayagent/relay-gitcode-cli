@@ -1,6 +1,9 @@
-use std::path::PathBuf;
+use std::{collections::BTreeSet, ffi::OsStr, path::PathBuf};
 
-use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
+use clap::{
+    Arg, Args, CommandFactory, Parser, Subcommand, ValueEnum,
+    error::{ContextKind, ContextValue},
+};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -22,6 +25,360 @@ impl Cli {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParseDiagnostic {
+    error: String,
+    usage: Option<String>,
+    suggestion: Option<String>,
+    matched_path: Vec<String>,
+    unexpected_token: Option<String>,
+    expected: Vec<String>,
+    json: bool,
+}
+
+impl ParseDiagnostic {
+    pub fn from_error<I, S>(args: I, error: &clap::Error) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        let args = args
+            .into_iter()
+            .map(|arg| arg.as_ref().to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        let root = Cli::command();
+        let tokens = args.get(1..).unwrap_or(&[]);
+        let matched_path = matched_path(&root, tokens);
+        let command = command_for_path(&root, &matched_path);
+        let usage = usage_from_error(error).or_else(|| command.map(command_usage));
+        let unexpected_token = unexpected_token(error);
+        let suggestion = suggestion_for(error, command, &matched_path, usage.as_deref());
+        let expected = expected_terms(&root, command.unwrap_or(&root));
+
+        Self {
+            error: clean_error_message(error),
+            usage,
+            suggestion,
+            matched_path,
+            unexpected_token,
+            expected,
+            json: wants_json_diagnostic(&args),
+        }
+    }
+
+    pub fn render_stderr(&self) -> String {
+        if self.json {
+            return serde_json::json!({
+                "error": self.error,
+                "matched_path": self.matched_path,
+                "unexpected_token": self.unexpected_token,
+                "expected": self.expected,
+                "suggestion": self.suggestion,
+                "usage": self.usage,
+            })
+            .to_string();
+        }
+
+        let mut output = self.error.clone();
+        if let Some(suggestion) = &self.suggestion {
+            output.push_str("\nTry: ");
+            output.push_str(suggestion);
+        }
+        if let Some(usage) = &self.usage {
+            output.push_str("\nUsage: ");
+            output.push_str(usage);
+        }
+        output
+    }
+}
+
+fn wants_json_diagnostic(args: &[String]) -> bool {
+    args.iter().enumerate().any(|(index, arg)| {
+        arg == "--json"
+            || arg == "--format=json"
+            || (arg == "--format" && args.get(index + 1).is_some_and(|value| value == "json"))
+    })
+}
+
+fn matched_path(root: &clap::Command, tokens: &[String]) -> Vec<String> {
+    let mut path = Vec::new();
+    let mut command = root;
+    let mut index = 0;
+
+    while index < tokens.len() {
+        let token = tokens[index].as_str();
+        if token == "--" {
+            break;
+        }
+        if token.starts_with('-') {
+            index += option_width(
+                root,
+                command,
+                token,
+                tokens.get(index + 1).map(String::as_str),
+            );
+            continue;
+        }
+        if let Some(subcommand) = find_subcommand(command, token) {
+            path.push(subcommand.get_name().to_string());
+            command = subcommand;
+            index += 1;
+            continue;
+        }
+        if command.get_subcommands().next().is_some() {
+            break;
+        }
+        index += 1;
+    }
+
+    path
+}
+
+fn option_width(
+    root: &clap::Command,
+    command: &clap::Command,
+    option: &str,
+    next: Option<&str>,
+) -> usize {
+    if next.is_none() || option == "--" {
+        return 1;
+    }
+    if let Some(name) = option.strip_prefix("--") {
+        if name.contains('=') {
+            return 1;
+        }
+        return if long_option_takes_value(command, name) || long_option_takes_value(root, name) {
+            2
+        } else {
+            1
+        };
+    }
+    if let Some(shorts) = option.strip_prefix('-') {
+        let mut chars = shorts.chars();
+        if let Some(short) = chars.next() {
+            return if chars.next().is_none()
+                && (short_option_takes_value(command, short)
+                    || short_option_takes_value(root, short))
+            {
+                2
+            } else {
+                1
+            };
+        }
+    }
+    1
+}
+
+fn long_option_takes_value(command: &clap::Command, name: &str) -> bool {
+    command
+        .get_arguments()
+        .any(|arg| arg.get_long() == Some(name) && arg_takes_value(arg))
+}
+
+fn short_option_takes_value(command: &clap::Command, short: char) -> bool {
+    command
+        .get_arguments()
+        .any(|arg| arg.get_short() == Some(short) && arg_takes_value(arg))
+}
+
+fn arg_takes_value(arg: &Arg) -> bool {
+    arg.get_action().takes_values()
+}
+
+fn find_subcommand<'a>(command: &'a clap::Command, token: &str) -> Option<&'a clap::Command> {
+    command.get_subcommands().find(|subcommand| {
+        subcommand.get_name() == token || subcommand.get_all_aliases().any(|alias| alias == token)
+    })
+}
+
+fn command_for_path<'a>(root: &'a clap::Command, path: &[String]) -> Option<&'a clap::Command> {
+    let mut command = root;
+    for segment in path {
+        command = find_subcommand(command, segment)?;
+    }
+    Some(command)
+}
+
+fn usage_from_error(error: &clap::Error) -> Option<String> {
+    error
+        .get(ContextKind::Usage)
+        .map(ToString::to_string)
+        .map(|usage| strip_usage_prefix(&usage))
+}
+
+fn command_usage(command: &clap::Command) -> String {
+    let mut command = command.clone();
+    strip_usage_prefix(&command.render_usage().to_string())
+}
+
+fn strip_usage_prefix(usage: &str) -> String {
+    usage
+        .trim()
+        .strip_prefix("Usage: ")
+        .unwrap_or_else(|| usage.trim())
+        .to_string()
+}
+
+fn unexpected_token(error: &clap::Error) -> Option<String> {
+    for kind in [
+        ContextKind::InvalidSubcommand,
+        ContextKind::InvalidArg,
+        ContextKind::InvalidValue,
+    ] {
+        if let Some(ContextValue::String(value)) = error.get(kind) {
+            return Some(value.clone());
+        }
+    }
+    None
+}
+
+fn suggestion_for(
+    error: &clap::Error,
+    command: Option<&clap::Command>,
+    matched_path: &[String],
+    usage: Option<&str>,
+) -> Option<String> {
+    if let Some(value) = command
+        .and_then(|command| nearest_subcommand(command, error, matched_path))
+        .or_else(|| first_context_string(error, ContextKind::SuggestedSubcommand))
+    {
+        return Some(command_try(
+            matched_path
+                .iter()
+                .map(String::as_str)
+                .chain([value.as_str()]),
+        ));
+    }
+    if let Some(value) = first_context_string(error, ContextKind::SuggestedArg) {
+        return Some(command_try(
+            matched_path
+                .iter()
+                .map(String::as_str)
+                .chain([value.as_str()]),
+        ));
+    }
+    if let Some(value) = first_context_string(error, ContextKind::SuggestedValue) {
+        return Some(value);
+    }
+    usage.map(str::to_string)
+}
+
+fn first_context_string(error: &clap::Error, kind: ContextKind) -> Option<String> {
+    match error.get(kind)? {
+        ContextValue::String(value) => Some(value.clone()),
+        ContextValue::Strings(values) => values.first().cloned(),
+        ContextValue::StyledStr(value) => Some(value.to_string()),
+        ContextValue::StyledStrs(values) => values.first().map(ToString::to_string),
+        _ => None,
+    }
+}
+
+fn nearest_subcommand(
+    command: &clap::Command,
+    error: &clap::Error,
+    _matched_path: &[String],
+) -> Option<String> {
+    let token = match error.get(ContextKind::InvalidSubcommand)? {
+        ContextValue::String(value) => value,
+        _ => return None,
+    };
+    command
+        .get_subcommands()
+        .map(|subcommand| subcommand.get_name())
+        .min_by_key(|name| {
+            (
+                edit_distance(name, token),
+                name.chars().count().abs_diff(token.chars().count()),
+            )
+        })
+        .filter(|name| edit_distance(name, token) <= 2)
+        .map(str::to_string)
+}
+
+fn command_try<'a>(segments: impl IntoIterator<Item = &'a str>) -> String {
+    std::iter::once("gd")
+        .chain(segments)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn expected_terms(root: &clap::Command, command: &clap::Command) -> Vec<String> {
+    if command.get_subcommands().next().is_some() {
+        return command
+            .get_subcommands()
+            .map(|subcommand| subcommand.get_name().to_string())
+            .collect();
+    }
+
+    let mut terms = BTreeSet::new();
+    insert_expected_args(command, &mut terms);
+    if command.get_name() != root.get_name() {
+        insert_expected_args(root, &mut terms);
+    }
+    terms.into_iter().collect()
+}
+
+fn insert_expected_args(command: &clap::Command, terms: &mut BTreeSet<String>) {
+    for arg in command.get_positionals() {
+        if let Some(name) = value_name(arg) {
+            terms.insert(format!("<{name}>"));
+        }
+    }
+    for arg in command.get_arguments().filter(|arg| !arg.is_positional()) {
+        if let Some(long) = arg.get_long().filter(|long| !is_builtin_arg(long)) {
+            terms.insert(format!("--{long}"));
+        } else if let Some(short) = arg.get_short() {
+            terms.insert(format!("-{short}"));
+        }
+    }
+}
+
+fn value_name(arg: &Arg) -> Option<String> {
+    arg.get_value_names()
+        .and_then(|names| names.first())
+        .map(ToString::to_string)
+        .or_else(|| Some(arg.get_id().to_string()))
+}
+
+fn is_builtin_arg(name: &str) -> bool {
+    matches!(name, "help" | "version")
+}
+
+fn clean_error_message(error: &clap::Error) -> String {
+    let message = error.to_string();
+    let line = message
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("failed to parse command");
+    line.strip_prefix("error: ").unwrap_or(line).to_string()
+}
+
+fn edit_distance(left: &str, right: &str) -> usize {
+    let right_len = right.chars().count();
+    let mut previous = (0..=right_len).collect::<Vec<_>>();
+    let mut current = vec![0; right_len + 1];
+
+    for (left_index, left_char) in left.chars().enumerate() {
+        current[0] = left_index + 1;
+        for (right_index, right_char) in right.chars().enumerate() {
+            let insertion = current[right_index] + 1;
+            let deletion = previous[right_index + 1] + 1;
+            let substitution = previous[right_index] + usize::from(left_char != right_char);
+            current[right_index + 1] = insertion.min(deletion).min(substitution);
+        }
+        std::mem::swap(&mut previous, &mut current);
+    }
+
+    previous[right_len]
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum CliOutputFormat {
+    Text,
+    Json,
+}
+
 #[derive(Debug, Args, Clone)]
 pub struct GlobalArgs {
     #[arg(long, global = true, default_value = "gitcode.com")]
@@ -38,17 +395,17 @@ pub struct GlobalArgs {
     #[arg(
         long,
         global = true,
-        env = "GITCODE_PIPELINE_API_BASE",
-        help = "CodeArts Pipeline API base URL"
+        value_enum,
+        value_name = "FORMAT",
+        help = "Render command output as text or JSON"
     )]
-    pub pipeline_api_base: Option<String>,
-    #[arg(
-        long,
-        global = true,
-        env = "GITCODE_PIPELINE_DOMAIN_ID",
-        help = "CodeArts tenant domain ID for pipeline APIs"
-    )]
-    pub pipeline_domain_id: Option<String>,
+    pub format: Option<CliOutputFormat>,
+}
+
+impl GlobalArgs {
+    pub fn json_output(&self) -> bool {
+        self.json || self.format == Some(CliOutputFormat::Json)
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -79,7 +436,7 @@ pub enum Command {
     #[command(about = "Manage repository releases")]
     #[command(subcommand)]
     Release(ReleaseCommand),
-    #[command(about = "Manage GitCode pipelines")]
+    #[command(about = "Manage GitCode pipelines", visible_alias = "actions")]
     #[command(subcommand)]
     Pipeline(PipelineCommand),
     #[command(about = "Generate shell completion scripts")]
@@ -416,68 +773,77 @@ pub struct ReleaseCreateArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum PipelineCommand {
-    #[command(about = "Register or update a GitCode workflow action")]
-    Register(PipelineRegisterArgs),
-    #[command(about = "Run a GitCode pipeline")]
+    #[command(
+        about = "Create or update a GitCode workflow file",
+        visible_alias = "register"
+    )]
+    Set(PipelineSetArgs),
+    #[command(about = "List GitCode workflow files")]
+    List(PipelineListArgs),
+    #[command(about = "Manually run a GitCode workflow")]
     Run(PipelineRunArgs),
-    #[command(about = "List GitCode pipeline execution records")]
+    #[command(about = "List GitCode workflow run records")]
     Runs(PipelineRunsArgs),
-    #[command(about = "View a GitCode pipeline run")]
+    #[command(about = "View a GitCode workflow run")]
     View(PipelineViewArgs),
-    #[command(about = "Read a GitCode pipeline job log")]
+    #[command(about = "Read a GitCode workflow job log")]
     Log(PipelineLogArgs),
-    #[command(about = "Stop a GitCode pipeline run")]
+    #[command(about = "Stop a GitCode workflow run")]
     Stop(PipelineStopArgs),
-    #[command(about = "Retry a GitCode pipeline run")]
+    #[command(about = "Retry failed GitCode workflow jobs")]
     Retry(PipelineRetryArgs),
+    #[command(about = "Rerun all jobs in a GitCode workflow run")]
+    Rerun(PipelineRerunArgs),
 }
 
 #[derive(Debug, Args)]
-pub struct PipelineRegisterArgs {
+pub struct PipelineSetArgs {
     #[arg(short = 'R', long = "repo")]
     pub repository: Option<String>,
-    #[arg(long = "type")]
-    pub kind: String,
+    pub path: String,
+    #[arg(long, value_enum, default_value_t = PipelineSetMode::Create)]
+    pub mode: PipelineSetMode,
     #[arg(long)]
-    pub new_file_path: String,
-    #[arg(long)]
-    pub old_file_path: Option<String>,
-    #[arg(long)]
-    pub file_content: Option<String>,
+    pub content: Option<String>,
     #[arg(long)]
     pub file: Option<PathBuf>,
+    #[arg(short = 'm', long, default_value = "Configure GitCode workflow")]
+    pub message: String,
     #[arg(long)]
-    pub encoding: Option<String>,
+    pub branch: Option<String>,
     #[arg(long)]
-    pub default_branch: Option<String>,
-    #[arg(long)]
-    pub file_commit_id: Option<String>,
-    #[arg(long)]
-    pub repo_id: Option<String>,
+    pub sha: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum PipelineSetMode {
+    Create,
+    Update,
+}
+
+#[derive(Debug, Args)]
+pub struct PipelineListArgs {
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(long, default_value_t = 1)]
+    pub page: u64,
+    #[arg(short = 'L', long = "limit", default_value_t = 50)]
+    pub limit: u64,
 }
 
 #[derive(Debug, Args)]
 pub struct PipelineRunArgs {
     #[arg(short = 'R', long = "repo")]
     pub repository: Option<String>,
-    #[arg(long)]
-    pub https_url: Option<String>,
+    pub workflow_id: String,
     #[arg(long)]
     pub file_path: String,
     #[arg(long)]
-    pub file_content: Option<String>,
-    #[arg(long)]
-    pub file: Option<PathBuf>,
-    #[arg(long)]
     pub branch: Option<String>,
     #[arg(long)]
-    pub encoding: Option<String>,
-    #[arg(long)]
-    pub tag: Option<String>,
-    #[arg(long)]
-    pub commit_id: Option<String>,
-    #[arg(long, env = "GITCODE_PIPELINE_ACCESS_TOKEN", hide_env_values = true)]
-    pub access_token: Option<String>,
+    pub branch_commit_id: Option<String>,
+    #[arg(long = "input")]
+    pub inputs: Vec<String>,
 }
 
 #[derive(Debug, Args)]
@@ -485,38 +851,40 @@ pub struct PipelineRunsArgs {
     #[arg(short = 'R', long = "repo")]
     pub repository: Option<String>,
     #[arg(long)]
-    pub https_url: Option<String>,
+    pub workflow_id: Option<String>,
     #[arg(long)]
-    pub pipeline_name: Option<String>,
-    #[arg(long)]
-    pub file_path: Option<String>,
-    #[arg(long)]
-    pub pipeline_run_name: Option<String>,
+    pub workflow_name: Option<String>,
     #[arg(long)]
     pub event: Option<String>,
-    #[arg(long)]
-    pub actor: Option<String>,
     #[arg(long)]
     pub branch: Option<String>,
     #[arg(long)]
     pub status: Option<String>,
-    #[arg(long, default_value_t = 0)]
-    pub offset: u64,
-    #[arg(long, default_value_t = 10)]
+    #[arg(long)]
+    pub executor_id: Option<String>,
+    #[arg(long)]
+    pub mr_id: Option<String>,
+    #[arg(long, default_value_t = 1)]
+    pub page: u64,
+    #[arg(short = 'L', long = "limit", default_value_t = 20)]
     pub limit: u64,
 }
 
 #[derive(Debug, Args)]
 pub struct PipelineViewArgs {
-    pub pipeline_id: String,
-    pub pipeline_run_id: String,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    pub workflow_run_id: String,
 }
 
 #[derive(Debug, Args)]
 pub struct PipelineLogArgs {
-    pub pipeline_id: String,
-    pub pipeline_run_id: String,
-    pub job_run_id: String,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    pub workflow_run_id: String,
+    pub job_identifier: String,
+    #[arg(long)]
+    pub step_run_id: Option<String>,
     #[arg(long, default_value_t = 0)]
     pub offset: u64,
     #[arg(long, default_value_t = 100)]
@@ -525,16 +893,25 @@ pub struct PipelineLogArgs {
 
 #[derive(Debug, Args)]
 pub struct PipelineStopArgs {
-    pub pipeline_id: String,
-    pub pipeline_run_id: String,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    pub workflow_run_id: String,
 }
 
 #[derive(Debug, Args)]
 pub struct PipelineRetryArgs {
-    pub pipeline_id: String,
-    pub pipeline_run_id: String,
-    #[arg(long, env = "GITCODE_PIPELINE_ACCESS_TOKEN", hide_env_values = true)]
-    pub access_token: Option<String>,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    pub workflow_run_id: String,
+    #[arg(long = "job-run-id")]
+    pub job_run_ids: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct PipelineRerunArgs {
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    pub workflow_run_id: String,
 }
 
 #[derive(Debug, Args)]
@@ -559,12 +936,86 @@ mod tests {
     fn parses_repo_view_with_json_flag() {
         let cli = Cli::try_parse_from(["gd", "--json", "repo", "view", "owner/repo"]).unwrap();
         assert!(cli.global.json);
+        assert!(cli.global.json_output());
         match cli.command {
             Command::Repo(RepoCommand::View(args)) => {
                 assert_eq!(args.repository.as_deref(), Some("owner/repo"));
             }
             other => panic!("unexpected command: {other:?}"),
         }
+    }
+
+    #[test]
+    fn parses_format_json_as_json_output() {
+        let cli = Cli::try_parse_from(["gd", "--format", "json", "repo", "list", "owner"]).unwrap();
+        assert_eq!(cli.global.format, Some(CliOutputFormat::Json));
+        assert!(cli.global.json_output());
+    }
+
+    #[test]
+    fn parse_diagnostic_suggests_nearest_subcommand() {
+        let args = ["gd", "pipeline", "rnus"];
+        let error = Cli::try_parse_from(args).unwrap_err();
+        let diagnostic = ParseDiagnostic::from_error(args, &error);
+
+        assert_eq!(diagnostic.matched_path, ["pipeline"]);
+        assert_eq!(diagnostic.unexpected_token.as_deref(), Some("rnus"));
+        assert_eq!(diagnostic.suggestion.as_deref(), Some("gd pipeline runs"));
+        assert!(diagnostic.expected.iter().any(|term| term == "runs"));
+
+        let stderr = diagnostic.render_stderr();
+        assert!(stderr.contains("Try: gd pipeline runs"));
+        assert!(stderr.contains("Usage: gd pipeline"));
+    }
+
+    #[test]
+    fn parse_diagnostic_reports_deepest_option_context() {
+        let args = ["gd", "repo", "list", "owner", "--limt"];
+        let error = Cli::try_parse_from(args).unwrap_err();
+        let diagnostic = ParseDiagnostic::from_error(args, &error);
+
+        assert_eq!(diagnostic.matched_path, ["repo", "list"]);
+        assert_eq!(diagnostic.unexpected_token.as_deref(), Some("--limt"));
+        assert!(diagnostic.expected.iter().any(|term| term == "--limit"));
+        assert!(
+            diagnostic
+                .usage
+                .as_deref()
+                .is_some_and(|usage| { usage.starts_with("gd repo list") })
+        );
+    }
+
+    #[test]
+    fn parse_diagnostic_renders_json_for_json_flag() {
+        let args = ["gd", "--json", "repo", "list", "owner", "--limt"];
+        let error = Cli::try_parse_from(args).unwrap_err();
+        let diagnostic = ParseDiagnostic::from_error(args, &error);
+        let stderr = diagnostic.render_stderr();
+
+        assert!(!stderr.contains('\n'));
+        let value: serde_json::Value = serde_json::from_str(&stderr).unwrap();
+        assert_eq!(value["matched_path"], serde_json::json!(["repo", "list"]));
+        assert_eq!(value["unexpected_token"], "--limt");
+        assert!(
+            value["expected"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|term| term == "--limit")
+        );
+    }
+
+    #[test]
+    fn parse_diagnostic_renders_json_for_format_json() {
+        let args = ["gd", "--format", "json", "repo", "list", "owner", "--limt"];
+        let error = Cli::try_parse_from(args).unwrap_err();
+        let diagnostic = ParseDiagnostic::from_error(args, &error);
+        let stderr = diagnostic.render_stderr();
+
+        assert!(!stderr.contains('\n'));
+        let value: serde_json::Value = serde_json::from_str(&stderr).unwrap();
+        assert_eq!(value["matched_path"], serde_json::json!(["repo", "list"]));
+        assert_eq!(value["unexpected_token"], "--limt");
     }
 
     #[test]
@@ -615,39 +1066,65 @@ mod tests {
     }
 
     #[test]
-    fn parses_pipeline_register() {
+    fn parses_pipeline_set() {
         let cli = Cli::try_parse_from([
             "gd",
-            "--pipeline-api-base",
-            "https://devcloud.example.com",
-            "--pipeline-domain-id",
-            "domain",
+            "pipeline",
+            "set",
+            "--repo",
+            "owner/repo",
+            ".gitcode/workflows/ci.yml",
+            "--content",
+            "name: ci",
+            "--mode",
+            "update",
+            "--sha",
+            "abc",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Command::Pipeline(PipelineCommand::Set(args)) => {
+                assert_eq!(args.repository.as_deref(), Some("owner/repo"));
+                assert_eq!(args.path, ".gitcode/workflows/ci.yml");
+                assert_eq!(args.content.as_deref(), Some("name: ci"));
+                assert_eq!(args.mode, PipelineSetMode::Update);
+                assert_eq!(args.sha.as_deref(), Some("abc"));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_pipeline_register_alias() {
+        let cli = Cli::try_parse_from([
+            "gd",
             "pipeline",
             "register",
             "--repo",
             "owner/repo",
-            "--type",
-            "create",
-            "--new-file-path",
             ".gitcode/workflows/ci.yml",
-            "--file-content",
+            "--content",
             "name: ci",
-            "--encoding",
-            "UTF-8",
         ])
         .unwrap();
 
-        assert_eq!(
-            cli.global.pipeline_api_base.as_deref(),
-            Some("https://devcloud.example.com")
-        );
-        assert_eq!(cli.global.pipeline_domain_id.as_deref(), Some("domain"));
+        assert!(matches!(
+            cli.command,
+            Command::Pipeline(PipelineCommand::Set(_))
+        ));
+    }
+
+    #[test]
+    fn parses_actions_alias() {
+        let cli =
+            Cli::try_parse_from(["gd", "actions", "list", "--repo", "owner/repo", "-L", "10"])
+                .unwrap();
+
         match cli.command {
-            Command::Pipeline(PipelineCommand::Register(args)) => {
+            Command::Pipeline(PipelineCommand::List(args)) => {
                 assert_eq!(args.repository.as_deref(), Some("owner/repo"));
-                assert_eq!(args.kind, "create");
-                assert_eq!(args.new_file_path, ".gitcode/workflows/ci.yml");
-                assert_eq!(args.file_content.as_deref(), Some("name: ci"));
+                assert_eq!(args.limit, 10);
             }
             other => panic!("unexpected command: {other:?}"),
         }
@@ -661,21 +1138,26 @@ mod tests {
             "run",
             "--repo",
             "owner/repo",
+            "workflow-1",
             "--file-path",
             ".gitcode/workflows/ci.yml",
             "--branch",
             "main",
-            "--commit-id",
+            "--branch-commit-id",
             "abc",
+            "--input",
+            "dry_run=true",
         ])
         .unwrap();
 
         match cli.command {
             Command::Pipeline(PipelineCommand::Run(args)) => {
                 assert_eq!(args.repository.as_deref(), Some("owner/repo"));
+                assert_eq!(args.workflow_id, "workflow-1");
                 assert_eq!(args.file_path, ".gitcode/workflows/ci.yml");
                 assert_eq!(args.branch.as_deref(), Some("main"));
-                assert_eq!(args.commit_id.as_deref(), Some("abc"));
+                assert_eq!(args.branch_commit_id.as_deref(), Some("abc"));
+                assert_eq!(args.inputs, ["dry_run=true"]);
             }
             other => panic!("unexpected command: {other:?}"),
         }
@@ -687,28 +1169,25 @@ mod tests {
             "gd",
             "pipeline",
             "runs",
-            "--https-url",
-            "https://gitcode.com/owner/repo.git",
-            "--pipeline-name",
+            "--repo",
+            "owner/repo",
+            "--workflow-name",
             "ci",
             "--event",
             "push",
-            "--offset",
-            "10",
-            "--limit",
+            "--page",
+            "2",
+            "-L",
             "20",
         ])
         .unwrap();
 
         match cli.command {
             Command::Pipeline(PipelineCommand::Runs(args)) => {
-                assert_eq!(
-                    args.https_url.as_deref(),
-                    Some("https://gitcode.com/owner/repo.git")
-                );
-                assert_eq!(args.pipeline_name.as_deref(), Some("ci"));
+                assert_eq!(args.repository.as_deref(), Some("owner/repo"));
+                assert_eq!(args.workflow_name.as_deref(), Some("ci"));
                 assert_eq!(args.event.as_deref(), Some("push"));
-                assert_eq!(args.offset, 10);
+                assert_eq!(args.page, 2);
                 assert_eq!(args.limit, 20);
             }
             other => panic!("unexpected command: {other:?}"),
@@ -716,38 +1195,71 @@ mod tests {
     }
 
     #[test]
-    fn parses_pipeline_view_log_stop_and_retry() {
-        let view = Cli::try_parse_from(["gd", "pipeline", "view", "pipe", "run"]).unwrap();
+    fn parses_pipeline_view_log_stop_retry_and_rerun() {
+        let view =
+            Cli::try_parse_from(["gd", "pipeline", "view", "--repo", "owner/repo", "run"]).unwrap();
         match view.command {
             Command::Pipeline(PipelineCommand::View(args)) => {
-                assert_eq!(args.pipeline_id, "pipe");
-                assert_eq!(args.pipeline_run_id, "run");
+                assert_eq!(args.repository.as_deref(), Some("owner/repo"));
+                assert_eq!(args.workflow_run_id, "run");
             }
             other => panic!("unexpected command: {other:?}"),
         }
 
         let log = Cli::try_parse_from([
-            "gd", "pipeline", "log", "pipe", "run", "job", "--limit", "7",
+            "gd",
+            "pipeline",
+            "log",
+            "--repo",
+            "owner/repo",
+            "run",
+            "job",
+            "--step-run-id",
+            "step",
+            "--limit",
+            "7",
         ])
         .unwrap();
         match log.command {
             Command::Pipeline(PipelineCommand::Log(args)) => {
-                assert_eq!(args.job_run_id, "job");
+                assert_eq!(args.workflow_run_id, "run");
+                assert_eq!(args.job_identifier, "job");
+                assert_eq!(args.step_run_id.as_deref(), Some("step"));
                 assert_eq!(args.limit, 7);
             }
             other => panic!("unexpected command: {other:?}"),
         }
 
-        let stop = Cli::try_parse_from(["gd", "pipeline", "stop", "pipe", "run"]).unwrap();
+        let stop =
+            Cli::try_parse_from(["gd", "pipeline", "stop", "-R", "owner/repo", "run"]).unwrap();
         assert!(matches!(
             stop.command,
             Command::Pipeline(PipelineCommand::Stop(_))
         ));
 
-        let retry = Cli::try_parse_from(["gd", "pipeline", "retry", "pipe", "run"]).unwrap();
+        let retry = Cli::try_parse_from([
+            "gd",
+            "pipeline",
+            "retry",
+            "-R",
+            "owner/repo",
+            "run",
+            "--job-run-id",
+            "job",
+        ])
+        .unwrap();
+        match retry.command {
+            Command::Pipeline(PipelineCommand::Retry(args)) => {
+                assert_eq!(args.job_run_ids, ["job"]);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        let rerun =
+            Cli::try_parse_from(["gd", "pipeline", "rerun", "-R", "owner/repo", "run"]).unwrap();
         assert!(matches!(
-            retry.command,
-            Command::Pipeline(PipelineCommand::Retry(_))
+            rerun.command,
+            Command::Pipeline(PipelineCommand::Rerun(_))
         ));
     }
 }

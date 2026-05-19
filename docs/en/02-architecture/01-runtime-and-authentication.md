@@ -6,8 +6,8 @@
 - `src/commands/mod.rs` maps parsed commands to GitCode API calls.
 - `src/client.rs` owns HTTP request construction, authentication headers,
   pagination, JSON decoding, and API error mapping.
-- `src/pipeline.rs` owns CodeArts Pipeline endpoint construction, request body
-  shaping, AK/SK request signing, and pipeline API error mapping.
+- `src/pipeline.rs` owns GitCode Actions endpoint construction, request body
+  shaping, workflow file helpers, and pipeline API error mapping.
 - `src/auth.rs` handles environment and keyring token lookup.
 - `src/config.rs` owns non-secret host and API base configuration.
 
@@ -23,11 +23,10 @@ Authorization: Bearer <token>
 This matches the GitCode API v5 documentation and avoids putting tokens in query
 strings by default.
 
-Pipeline commands use `GITCODE_PIPELINE_API_BASE` and
-`GITCODE_PIPELINE_DOMAIN_ID` for the CodeArts Pipeline host and tenant scope.
-They prefer AK/SK signing through `HUAWEICLOUD_SDK_AK` and
-`HUAWEICLOUD_SDK_SK`, with `CLOUD_SDK_AK` and `CLOUD_SDK_SK` as aliases.
-If AK/SK is absent, the stored GitCode token is sent as a Bearer token.
+Pipeline commands use the same Bearer token flow. Workflow file creation and
+updates go through the GitCode API v5 repository contents endpoints. Workflow
+run listing, manual dispatch, run details, log reads, stop, retry, and rerun use
+the GitCode Actions endpoints under the configured hostname.
 
 ## Command Boundary
 
