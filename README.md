@@ -28,15 +28,17 @@ OpenLibing-backed pipeline gate checks use separate credentials. Use
 `GD_OPENLIBING_COOKIE` for automation.
 
 Each GitHub Release also includes
-`relay-gitcode-cli-skill-<tag>.tar.gz`, a text-only ClawHub-compatible skill
-that teaches LLM agents to use the local `gd` CLI for GitCode API v5 workflows.
-The skill is installed from published releases or ClawHub, not from a local
-repository checkout. The release workflow can publish the same
-`skills/relay-gitcode-cli` directory to ClawHub when `CLAWHUB_TOKEN` is
-configured:
+`relay-gitcode-cli-skill-<tag>.tar.gz`, a ClawHub-compatible skill that teaches
+LLM agents to use `gd` for GitCode API v5 workflows. The skill includes bundled
+Linux x64 and Windows x64 `gd` binaries, prefers the newest usable bundled or
+`PATH` binary, and falls back to released online artifacts when needed. The
+skill is installed from published releases or ClawHub, not from a local
+repository checkout. The release workflow can publish the packaged skill bundle
+to ClawHub when `CLAWHUB_TOKEN` is configured:
 
 ```bash
-clawhub publish skills/relay-gitcode-cli \
+tar -xzf relay-gitcode-cli-skill-<tag>.tar.gz
+clawhub skill publish relay-gitcode-cli-skill-<tag> \
   --slug relay-gitcode-cli \
   --name "Relay GitCode CLI" \
   --version <version>

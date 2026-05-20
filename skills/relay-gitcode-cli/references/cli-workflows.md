@@ -14,8 +14,20 @@
 
 ## Installation and Authentication
 
-Install and upgrade from released artifacts. Prefer the Rust package first and
-GitHub Releases second:
+Select the newest usable released `gd` binary before running workflows. Check
+the bundled binary for the current platform, if present:
+`assets/bin/linux-x86_64/gd` on Linux x64 or
+`assets/bin/windows-x86_64/gd.exe` on Windows x64. Also check the `gd` binary
+found on `PATH` with `command -v gd` on Unix or `where gd` on Windows.
+
+Run `<candidate> --version` for each candidate and parse the semver from output
+such as `gd 0.1.0`. Use the highest semver. If versions are equal, prefer the
+bundled binary. Ignore candidates that cannot run or do not print a parseable
+`gd` version. If the selected binary is not on `PATH`, run it by absolute path
+or set `GD_BIN` and substitute `"$GD_BIN"` for `gd` in examples.
+
+Only install online when no bundled or `PATH` binary is usable. Prefer the Rust
+package first and GitHub Releases second:
 
 ```bash
 cargo install relay-gitcode-cli --force
@@ -23,8 +35,14 @@ gd --version
 gd version check --json
 ```
 
+When falling back to GitHub Releases downloads, use the environment proxy
+required by the host network. Check or set `HTTPS_PROXY`/`https_proxy`,
+`HTTP_PROXY`/`http_proxy`, `ALL_PROXY`/`all_proxy`, and
+`NO_PROXY`/`no_proxy` before running `curl`, `wget`, or another downloader.
+
 Do not install from a local repository checkout as part of this skill workflow.
-The skill is independently published and should use the released `gd` CLI.
+The bundled binaries and online fallbacks should come from released CLI
+artifacts.
 
 Use `GITCODE_TOKEN` for temporary automation and CI:
 

@@ -17,10 +17,16 @@ The gate runs formatting, clippy with warnings denied, tests, and a build.
   and GitHub Release creation.
 
 GitHub Releases include `relay-gitcode-cli-skill-<tag>.tar.gz`, built from
-`skills/relay-gitcode-cli` with the same version as `Cargo.toml`. When
-`CLAWHUB_TOKEN` is configured, the release workflow also publishes that
-directory to ClawHub with `clawhub publish`. The skill should be installed from
-that published release artifact or ClawHub package, not from a local checkout.
+`skills/relay-gitcode-cli` with the same version as `Cargo.toml`. The release
+workflow injects the Linux x64 and Windows x64 `gd` binaries into the skill
+`assets` directory before packaging it. When `CLAWHUB_TOKEN` is configured, the
+release workflow also publishes the packaged skill bundle to ClawHub with
+`clawhub skill publish`, so the ClawHub package contains the same bundled
+assets as the GitHub Release archive. The skill should be installed from that
+published release artifact or ClawHub package, not from a local checkout.
+
+GitHub stores secret names in uppercase, so a `clawhub_token` secret created in
+the repository settings is available to the workflow as `CLAWHUB_TOKEN`.
 
 ## GitCode Pipeline
 

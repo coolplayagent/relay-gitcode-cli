@@ -129,9 +129,11 @@ gd version check --json
 ## Skill-over-CLI
 
 仓库随附 `skills/relay-gitcode-cli`，这是一个兼容 ClawHub 的 skill，用于让
-LLM agent 通过本地 `gd` CLI 操作 GitCode，并解析 JSON 输出。它覆盖认证检查、
-仓库工作流、Issue、Pull Request、搜索、SSH key、标签、Release、OpenLibing
-流水线门禁、原始 `gd api` 调用和 shell completion。
+LLM agent 通过 `gd` 操作 GitCode，并解析 JSON 输出。release skill 包内置
+Linux x64 和 Windows x64 `gd` 二进制，会优先使用内置或 `PATH` 中版本最新的
+可用二进制，必要时再回退到发布版在线产物。它覆盖认证检查、仓库工作流、Issue、
+Pull Request、搜索、SSH key、标签、Release、OpenLibing 流水线门禁、原始
+`gd api` 调用和 shell completion。
 
 该 skill 只保持在 GitCode 支持的 `gd` 行为范围内。除非 GitCode 提供可通过
 `gd api` 访问的等价 API，否则它不会增加 GitHub 专属的 `gh` 命令面。

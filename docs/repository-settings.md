@@ -10,6 +10,8 @@ This repository ships CI for both GitHub Actions and GitCode Pipeline.
 - Configure release secrets:
   - `CARGO_REGISTRY_TOKEN` for crates.io publishing.
   - `CLAWHUB_TOKEN` for optional ClawHub skill publishing.
+    GitHub stores secret names in uppercase, so `clawhub_token` is read as
+    `CLAWHUB_TOKEN` by the workflow.
   - `QODANA_TOKEN` for JetBrains Qodana Cloud reporting.
 
 ## GitCode
