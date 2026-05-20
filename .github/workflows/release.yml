@@ -23,6 +23,7 @@ env:
   CARGO_TERM_COLOR: always
   BIN_NAME: gd
   SKILL_NAME: relay-gitcode-cli
+  CLAWHUB_CLI_VERSION: 0.17.0
 
 jobs:
   verify:
@@ -104,6 +105,9 @@ jobs:
           grep -q 'GITCODE_TOKEN' "skills/${SKILL_NAME}/SKILL.md"
           grep -q 'gd version check --json' "skills/${SKILL_NAME}/SKILL.md"
           grep -q 'gd api /user --json' "skills/${SKILL_NAME}/SKILL.md"
+          grep -q 'assets/bin/linux-x86_64/gd' "skills/${SKILL_NAME}/SKILL.md"
+          grep -q 'assets/bin/windows-x86_64/gd.exe' "skills/${SKILL_NAME}/SKILL.md"
+          grep -q 'HTTPS_PROXY' "skills/${SKILL_NAME}/SKILL.md"
           grep -q 'Do not use this skill for GitHub-only' "skills/${SKILL_NAME}/SKILL.md"
           grep -q 'default_prompt: "Use \$relay-gitcode-cli' "skills/${SKILL_NAME}/agents/openai.yaml"
 
@@ -223,7 +227,9 @@ jobs:
 
   skill:
     name: Package CLI skill
-    needs: verify
+    needs:
+      - verify
+      - build
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -231,6 +237,18 @@ jobs:
 
       - name: Install Rust toolchain
         run: rustup toolchain install stable --profile minimal
+
+      - name: Download Linux x64 release archive
+        uses: actions/download-artifact@v6
+        with:
+          name: ${{ env.BIN_NAME }}-${{ needs.verify.outputs.tag }}-x86_64-unknown-linux-gnu
+          path: skill-assets/linux-x86_64
+
+      - name: Download Windows x64 release archive
+        uses: actions/download-artifact@v6
+        with:
+          name: ${{ env.BIN_NAME }}-${{ needs.verify.outputs.tag }}-x86_64-pc-windows-msvc
+          path: skill-assets/windows-x86_64
 
       - name: Validate CLI skill version inputs
         shell: bash
@@ -242,6 +260,35 @@ jobs:
             echo "Skill release version must follow Cargo.toml: $manifest_version != ${{ needs.verify.outputs.version }}" >&2
             exit 1
           fi
+
+      - name: Inject bundled gd binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          linux_target="x86_64-unknown-linux-gnu"
+          windows_target="x86_64-pc-windows-msvc"
+          linux_archive="skill-assets/linux-x86_64/${BIN_NAME}-${{ needs.verify.outputs.tag }}-${linux_target}.tar.gz"
+          windows_archive="skill-assets/windows-x86_64/${BIN_NAME}-${{ needs.verify.outputs.tag }}-${windows_target}.zip"
+
+          linux_asset="skills/${SKILL_NAME}/assets/bin/linux-x86_64/${BIN_NAME}"
+          windows_asset="skills/${SKILL_NAME}/assets/bin/windows-x86_64/${BIN_NAME}.exe"
+          mkdir -p "$(dirname "$linux_asset")" "$(dirname "$windows_asset")"
+
+          tar -xOf "$linux_archive" "${BIN_NAME}-${{ needs.verify.outputs.tag }}-${linux_target}/${BIN_NAME}" > "$linux_asset"
+          chmod 0755 "$linux_asset"
+
+          python3 - "$windows_archive" "${BIN_NAME}-${{ needs.verify.outputs.tag }}-${windows_target}/${BIN_NAME}.exe" "$windows_asset" <<'PY'
+          import pathlib
+          import sys
+          import zipfile
+
+          archive, member, output = sys.argv[1:]
+          pathlib.Path(output).write_bytes(zipfile.ZipFile(archive).read(member))
+          PY
+
+          test -x "$linux_asset"
+          test -f "$windows_asset"
+          "$linux_asset" --version
 
       - name: Create skill archive
         shell: bash
@@ -357,12 +404,13 @@ jobs:
 
           ## CLI Skill
 
-          This release includes `relay-gitcode-cli-skill-${{ needs.verify.outputs.tag }}.tar.gz`, a ClawHub-compatible skill that teaches LLM agents to use the released `gd` CLI for GitCode API v5 workflows.
+          This release includes `relay-gitcode-cli-skill-${{ needs.verify.outputs.tag }}.tar.gz`, a ClawHub-compatible skill that teaches LLM agents to use `gd` for GitCode API v5 workflows. The skill includes bundled Linux x64 and Windows x64 `gd` binaries and falls back to PATH, crates.io, or GitHub Releases when needed.
 
           Registry maintainers can publish the same skill directory with:
 
           ```bash
-          clawhub publish skills/relay-gitcode-cli --slug relay-gitcode-cli --name "Relay GitCode CLI" --version ${{ needs.verify.outputs.version }}
+          tar -xzf relay-gitcode-cli-skill-${{ needs.verify.outputs.tag }}.tar.gz
+          clawhub skill publish relay-gitcode-cli-skill-${{ needs.verify.outputs.tag }} --slug relay-gitcode-cli --name "Relay GitCode CLI" --version ${{ needs.verify.outputs.version }}
           ```
 
           ## Verification
@@ -439,6 +487,25 @@ jobs:
           fi
           echo "publish=true" >> "$GITHUB_OUTPUT"
 
+      - name: Download packaged skill archive
+        if: steps.clawhub-token.outputs.publish == 'true'
+        uses: actions/download-artifact@v6
+        with:
+          name: ${{ env.SKILL_NAME }}-skill-${{ needs.verify.outputs.tag }}
+          path: packaged-skill
+
+      - name: Extract packaged skill archive
+        if: steps.clawhub-token.outputs.publish == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          package="${SKILL_NAME}-skill-${{ needs.verify.outputs.tag }}"
+          archive="packaged-skill/${package}.tar.gz"
+          mkdir -p clawhub-skill
+          tar -C clawhub-skill -xzf "$archive"
+          test -x "clawhub-skill/${package}/assets/bin/linux-x86_64/${BIN_NAME}"
+          test -f "clawhub-skill/${package}/assets/bin/windows-x86_64/${BIN_NAME}.exe"
+
       - name: Set up Node
         if: steps.clawhub-token.outputs.publish == 'true'
         uses: actions/setup-node@v4
@@ -447,7 +514,15 @@ jobs:
 
       - name: Install ClawHub CLI
         if: steps.clawhub-token.outputs.publish == 'true'
-        run: npm install -g clawhub
+        run: npm install -g "clawhub@${CLAWHUB_CLI_VERSION}"
+
+      - name: Verify ClawHub CLI
+        if: steps.clawhub-token.outputs.publish == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          clawhub --cli-version
+          clawhub skill publish --help >/dev/null
 
       - name: Publish skill
         if: steps.clawhub-token.outputs.publish == 'true'
@@ -462,7 +537,7 @@ jobs:
           fi
 
           clawhub --no-input login --token "$CLAWHUB_TOKEN"
-          clawhub publish "skills/${SKILL_NAME}" \
+          clawhub --no-input skill publish "clawhub-skill/${SKILL_NAME}-skill-${{ needs.verify.outputs.tag }}" \
             --slug "${SKILL_NAME}" \
             --name "Relay GitCode CLI" \
             --version "${{ needs.verify.outputs.version }}" \

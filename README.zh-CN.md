@@ -26,14 +26,16 @@ OpenLibing 提供的流水线门禁使用独立凭据。交互场景使用
 `GD_OPENLIBING_TOKEN` 或 `GD_OPENLIBING_COOKIE`。
 
 每个 GitHub Release 还会包含
-`relay-gitcode-cli-skill-<tag>.tar.gz`，这是一个纯文本、兼容 ClawHub
-的 skill，用于引导 LLM agent 通过本地 `gd` CLI 使用 GitCode API v5
-工作流。该 skill 应从发布包或 ClawHub 安装，不应从本地仓库 checkout
-安装。配置 `CLAWHUB_TOKEN` 后，release workflow 可以把同一个
-`skills/relay-gitcode-cli` 目录发布到 ClawHub：
+`relay-gitcode-cli-skill-<tag>.tar.gz`，这是一个兼容 ClawHub 的 skill，
+用于引导 LLM agent 通过 `gd` 使用 GitCode API v5 工作流。该 skill
+内置 Linux x64 和 Windows x64 `gd` 二进制，会优先使用内置或 `PATH`
+中版本最新的可用二进制，必要时再回退到发布版在线产物。该 skill 应从发布包
+或 ClawHub 安装，不应从本地仓库 checkout 安装。配置 `CLAWHUB_TOKEN`
+后，release workflow 可以把打包后的 skill bundle 发布到 ClawHub：
 
 ```bash
-clawhub publish skills/relay-gitcode-cli \
+tar -xzf relay-gitcode-cli-skill-<tag>.tar.gz
+clawhub skill publish relay-gitcode-cli-skill-<tag> \
   --slug relay-gitcode-cli \
   --name "Relay GitCode CLI" \
   --version <version>
