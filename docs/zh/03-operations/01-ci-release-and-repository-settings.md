@@ -18,11 +18,13 @@
 
 GitHub Release 包含从 `skills/relay-gitcode-cli` 构建的
 `relay-gitcode-cli-skill-<tag>.tar.gz`，版本跟随 `Cargo.toml`。release
-workflow 会在打包前把 Linux x64 和 Windows x64 的 `gd` 二进制注入 skill
-的 `assets` 目录。配置 `CLAWHUB_TOKEN` 后，release workflow 还会用
+workflow 会先把源码中的 `metadata.version` 占位符替换为已校验的 Cargo
+版本，再在打包前把 Linux x64 和 Windows x64 的 `gd` 二进制注入 skill 的
+`assets` 目录。配置 `CLAWHUB_TOKEN` 后，release workflow 还会用
 `clawhub skill publish` 把打包后的 skill bundle 发布到 ClawHub，因此
-ClawHub package 会包含与 GitHub Release 归档相同的内置 assets。该 skill
-应从发布产物或 ClawHub package 安装，不应从本地 checkout 安装。
+ClawHub package 会包含与 GitHub Release 归档相同的 metadata version 和内置
+assets。该 skill 应从发布产物或 ClawHub package 安装，不应从本地 checkout
+安装。
 
 GitHub 会把 secret 名称按大写保存，因此在仓库设置中创建的 `clawhub_token`
 会在 workflow 中作为 `CLAWHUB_TOKEN` 读取。配置 `GITCODE_TOKEN` 后，release

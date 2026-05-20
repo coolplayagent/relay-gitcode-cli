@@ -101,6 +101,7 @@ jobs:
           test -f "skills/${SKILL_NAME}/agents/openai.yaml"
           test -f "skills/${SKILL_NAME}/references/cli-workflows.md"
           grep -q '^name: relay-gitcode-cli$' "skills/${SKILL_NAME}/SKILL.md"
+          grep -q '^  version: 0\.0\.0$' "skills/${SKILL_NAME}/SKILL.md"
           grep -q 'homepage: https://github.com/coolplayagent/relay-gitcode-cli' "skills/${SKILL_NAME}/SKILL.md"
           grep -q 'GITCODE_TOKEN' "skills/${SKILL_NAME}/SKILL.md"
           grep -q 'gd version check --json' "skills/${SKILL_NAME}/SKILL.md"
@@ -260,6 +261,28 @@ jobs:
             echo "Skill release version must follow Cargo.toml: $manifest_version != ${{ needs.verify.outputs.version }}" >&2
             exit 1
           fi
+
+      - name: Inject CLI skill metadata version
+        env:
+          SKILL_VERSION: ${{ needs.verify.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          skill_file="skills/${SKILL_NAME}/SKILL.md"
+          python3 - "$skill_file" "$SKILL_VERSION" <<'PY'
+          import pathlib
+          import sys
+
+          skill_file, version = sys.argv[1:]
+          path = pathlib.Path(skill_file)
+          text = path.read_text()
+          placeholder = "\nmetadata:\n  version: 0.0.0\n"
+          replacement = f"\nmetadata:\n  version: {version}\n"
+          if placeholder not in text:
+              raise SystemExit(f"{skill_file} does not contain the metadata.version placeholder")
+          path.write_text(text.replace(placeholder, replacement, 1))
+          PY
+          grep -q "^  version: ${SKILL_VERSION}$" "$skill_file"
 
       - name: Inject bundled gd binaries
         shell: bash
