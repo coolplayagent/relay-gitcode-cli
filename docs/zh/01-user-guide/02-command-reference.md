@@ -25,9 +25,15 @@ gd repo list owner
 gd repo clone owner/repo
 gd repo create name --private --description "demo"
 gd repo fork owner/repo
+gd repo move owner/repo target-owner/new-name
+gd repo move owner/repo target-owner --name new-name
 gd repo sync-github coolplayagent/relay-gitcode-cli --org plm-cac --private
 gd repo sync-github git@github.com:owner/repo.git --repo target-org/repo --if-exists skip
 ```
+
+`gd repo move` 可将仓库迁移到另一个 GitCode 用户或组织名下。使用
+`target-owner/new-name` 或 `--name new-name` 可在迁移时同步改名；当目标 owner
+与当前 owner 相同，它只执行仓库改名。
 
 `gd repo sync-github` 会通过 GitHub 仓库 `import_url` 在 GitCode 创建并导入
 仓库。不传 `--org` 或 `--repo` 时导入到当前认证的 GitCode 用户命名空间；

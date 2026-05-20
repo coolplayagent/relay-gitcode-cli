@@ -326,6 +326,189 @@ fn gd_pr_comment_and_reply_use_gitcode_bearer_token() {
 }
 
 #[test]
+fn gd_repo_move_transfers_repository_with_new_name() {
+    let server = MockServer::spawn(2, |request| {
+        match (request.method(), request.path_without_query()) {
+            ("POST", "/api/v5/repos/source-owner/source-repo/transfer") => MockResponse {
+                status: 200,
+                body: r#"{"full_name":"target-owner/source-repo"}"#,
+            },
+            ("PATCH", "/api/v5/repos/target-owner/source-repo") => MockResponse {
+                status: 200,
+                body: r#"{"full_name":"target-owner/target-repo"}"#,
+            },
+            _ => MockResponse {
+                status: 404,
+                body: r#"{"message":"unexpected request"}"#,
+            },
+        }
+    });
+    let config_dir = tempfile::tempdir().expect("create temporary config dir");
+    let api_base = format!("{}/api/v5", server.base_url());
+
+    let mut command = gd_command();
+    let output = command
+        .env("GITCODE_TOKEN", "integration-token")
+        .env("GD_CONFIG_PATH", config_dir.path().join("config.json"))
+        .arg("--api-base")
+        .arg(api_base)
+        .args([
+            "repo",
+            "move",
+            "source-owner/source-repo",
+            "target-owner/target-repo",
+            "--json",
+        ])
+        .output()
+        .expect("run gd repo move");
+
+    let requests = server.finish();
+    assert_command_success(&output, &requests);
+    assert_eq!(requests.len(), 2);
+    assert!(
+        requests
+            .iter()
+            .all(|request| request.header("authorization") == Some("Bearer integration-token"))
+    );
+    assert!(requests.iter().any(|request| {
+        request.path_without_query() == "/api/v5/repos/source-owner/source-repo/transfer"
+            && request.body.contains(r#""new_owner":"target-owner""#)
+            && request.body.contains(r#""new_name":"target-repo""#)
+    }));
+    assert!(requests.iter().any(|request| {
+        request.path_without_query() == "/api/v5/repos/target-owner/source-repo"
+            && request.body.contains(r#""name":"target-repo""#)
+            && request.body.contains(r#""path":"target-repo""#)
+    }));
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("integration-token"));
+}
+
+#[test]
+fn gd_repo_move_skips_patch_when_transfer_applies_new_name() {
+    let server = MockServer::spawn(1, |request| {
+        if request.method() == "POST"
+            && request.path_without_query() == "/api/v5/repos/source-owner/source-repo/transfer"
+        {
+            MockResponse {
+                status: 200,
+                body: r#"{"new_owner":"target-owner","new_name":"target-repo"}"#,
+            }
+        } else {
+            MockResponse {
+                status: 404,
+                body: r#"{"message":"unexpected request"}"#,
+            }
+        }
+    });
+    let config_dir = tempfile::tempdir().expect("create temporary config dir");
+    let api_base = format!("{}/api/v5", server.base_url());
+
+    let mut command = gd_command();
+    let output = command
+        .env("GITCODE_TOKEN", "integration-token")
+        .env("GD_CONFIG_PATH", config_dir.path().join("config.json"))
+        .arg("--api-base")
+        .arg(api_base)
+        .args([
+            "repo",
+            "move",
+            "source-owner/source-repo",
+            "target-owner/target-repo",
+            "--json",
+        ])
+        .output()
+        .expect("run gd repo move");
+
+    let requests = server.finish();
+    assert_command_success(&output, &requests);
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0].header("authorization"),
+        Some("Bearer integration-token")
+    );
+    assert!(requests[0].body.contains(r#""new_owner":"target-owner""#));
+    assert!(requests[0].body.contains(r#""new_name":"target-repo""#));
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("integration-token"));
+}
+
+#[test]
+fn gd_repo_move_renames_repository_with_patch() {
+    let server = MockServer::spawn(1, |request| {
+        if request.method() == "PATCH" && request.path_without_query() == "/api/v5/repos/owner/repo"
+        {
+            MockResponse {
+                status: 200,
+                body: r#"{"full_name":"owner/renamed"}"#,
+            }
+        } else {
+            MockResponse {
+                status: 404,
+                body: r#"{"message":"unexpected request"}"#,
+            }
+        }
+    });
+    let config_dir = tempfile::tempdir().expect("create temporary config dir");
+    let api_base = format!("{}/api/v5", server.base_url());
+
+    let mut command = gd_command();
+    let output = command
+        .env("GITCODE_TOKEN", "integration-token")
+        .env("GD_CONFIG_PATH", config_dir.path().join("config.json"))
+        .arg("--api-base")
+        .arg(api_base)
+        .args([
+            "repo",
+            "move",
+            "owner/repo",
+            "owner",
+            "--name",
+            "renamed",
+            "--json",
+        ])
+        .output()
+        .expect("run gd repo move rename");
+
+    let requests = server.finish();
+    assert_command_success(&output, &requests);
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0].header("authorization"),
+        Some("Bearer integration-token")
+    );
+    assert!(requests[0].body.contains(r#""name":"renamed""#));
+    assert!(requests[0].body.contains(r#""path":"renamed""#));
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("integration-token"));
+}
+
+#[test]
+fn gd_repo_move_rejects_ambiguous_target_name() {
+    let config_dir = tempfile::tempdir().expect("create temporary config dir");
+
+    let mut command = gd_command();
+    let output = command
+        .env("GITCODE_TOKEN", "integration-token")
+        .env("GD_CONFIG_PATH", config_dir.path().join("config.json"))
+        .arg("--api-base")
+        .arg("http://127.0.0.1:9/api/v5")
+        .args([
+            "repo",
+            "move",
+            "source-owner/source-repo",
+            "target-owner/target-repo",
+            "--name",
+            "other-repo",
+            "--json",
+        ])
+        .output()
+        .expect("run gd repo move ambiguous target");
+
+    assert!(!output.status.success(), "ambiguous repo move should fail");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("use either target-owner/name or --name, not both"));
+    assert!(!stderr.contains("integration-token"));
+}
+
+#[test]
 fn gd_pipeline_codecheck_creates_workflow_without_leaking_token() {
     let server = MockServer::spawn(2, |request| {
         match (request.method(), request.path_without_query()) {

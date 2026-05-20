@@ -100,8 +100,18 @@ gd repo list owner --limit 50 --json
 gd repo clone owner/repo
 gd repo create name --private --description "demo" --json
 gd repo fork owner/repo --json
+gd repo move owner/repo target-owner/new-name --json
+gd repo move owner/repo target-owner --name new-name --json
 gd repo sync-github coolplayagent/relay-gitcode-cli --org plm-cac --private --json
 gd repo sync-github git@github.com:owner/repo.git --repo target-org/repo --if-exists skip --json
+```
+
+`gd repo move` moves a GitCode repository between users and organizations, or
+renames it when the target owner is unchanged. Use a disposable repository for
+E2E checks:
+
+```bash
+GITCODE_TOKEN=... GD_E2E_SOURCE_REPO=owner/repo GD_E2E_TARGET_OWNER=target-owner GD_E2E_TARGET_NAME=temporary-name scripts/e2e-repo-move.sh
 ```
 
 `gd repo sync-github` accepts a GitHub `owner/repo`, HTTPS URL, or SSH URL and

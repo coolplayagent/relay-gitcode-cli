@@ -93,9 +93,16 @@ Create or fork repositories:
 ```bash
 gd repo create demo --private --description "demo repository" --json
 gd repo fork owner/repo --json
+gd repo move owner/repo target-owner/new-name --json
+gd repo move owner/repo target-owner --name new-name --json
 gd repo sync-github coolplayagent/relay-gitcode-cli --org plm-cac --private --json
 gd repo sync-github git@github.com:owner/repo.git --repo target-org/repo --if-exists skip --json
 ```
+
+Use `gd repo move` to transfer a GitCode repository between a user and an
+organization, between organizations, or back to a user namespace. Include a new
+repository name as `target-owner/new-name` or pass `--name new-name`; if the
+owner is unchanged, the command only renames the repository.
 
 Use `gd repo sync-github` to create a GitCode repository from a GitHub
 `import_url`. The source accepts `owner/repo`, HTTPS, or SSH GitHub URLs. Omit
