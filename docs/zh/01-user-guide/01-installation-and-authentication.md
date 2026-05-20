@@ -54,6 +54,6 @@ https://api.gitcode.com/api/v5
 `HTTP_PROXY`/`http_proxy`、`HTTPS_PROXY`/`https_proxy`、
 `ALL_PROXY`/`all_proxy` 和 `NO_PROXY`/`no_proxy`。
 
-GitCode API 调用默认不校验 TLS 证书。设置 `GD_SSL_VERIFY`、
-`GITCODE_SSL_VERIFY` 或 `SSL_VERIFY` 为 `true` 可启用证书校验；
-`GIT_SSL_NO_VERIFY` 为任意非空值时会保持禁用校验。
+GitCode API 调用默认不校验 TLS 证书。设置 `GD_SSL_VERIFY`/`gd_ssl_verify`、
+`GITCODE_SSL_VERIFY`/`gitcode_ssl_verify` 或 `SSL_VERIFY`/`ssl_verify` 为
+`true` 可启用证书校验；`GIT_SSL_NO_VERIFY`/`git_ssl_no_verify` 为任意非空值时会保持禁用校验。
