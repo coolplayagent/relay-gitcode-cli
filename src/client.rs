@@ -106,10 +106,50 @@ impl GitcodeClient {
         }
         let form = multipart::Form::new()
             .text("name", file_name.to_string())
+            .text("file_name", file_name.to_string())
             .part("file", part);
 
         let mut builder = self.http.post(url).multipart(form);
         builder = self.apply_auth(builder);
+        let response = builder
+            .send()
+            .await
+            .context("GitCode release asset upload failed")?;
+        let status = response.status();
+        let text = response
+            .text()
+            .await
+            .context("failed to read GitCode release asset upload response")?;
+        let body = parse_response_body(&text)?;
+        if status.is_success() {
+            Ok(body)
+        } else {
+            Err(api_status_error(status, &body))
+        }
+    }
+
+    pub async fn upload_raw_bytes(
+        &self,
+        upload_url: &str,
+        headers: &[(String, String)],
+        content_type: Option<&str>,
+        bytes: Vec<u8>,
+    ) -> anyhow::Result<Value> {
+        let url = Url::parse(upload_url)
+            .with_context(|| format!("invalid release asset upload URL: {upload_url}"))?;
+        let mut builder = self.http.put(url).body(bytes);
+        let mut has_content_type = false;
+        for (name, value) in headers {
+            let name = HeaderName::from_bytes(name.as_bytes())
+                .with_context(|| format!("invalid upload header name: {name}"))?;
+            let value = HeaderValue::from_str(value)
+                .with_context(|| format!("invalid upload header value for {name}"))?;
+            has_content_type |= name == reqwest::header::CONTENT_TYPE;
+            builder = builder.header(name, value);
+        }
+        if !has_content_type && let Some(content_type) = content_type {
+            builder = builder.header(reqwest::header::CONTENT_TYPE, content_type);
+        }
         let response = builder
             .send()
             .await

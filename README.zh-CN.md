@@ -60,6 +60,7 @@ gd repo create name --private --description "demo"
 gd repo fork owner/repo
 gd repo move owner/repo target-owner/new-name
 gd repo sync-github coolplayagent/relay-gitcode-cli --org plm-cac --private
+gd repo sync-github coolplayagent/relay-gitcode-cli --repo plm-cac/relay-gitcode-cli --method git-push --if-exists update --private
 
 gd issue list --repo owner/repo
 gd issue view 1 --repo owner/repo

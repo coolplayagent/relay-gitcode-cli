@@ -104,6 +104,7 @@ gd repo move owner/repo target-owner/new-name --json
 gd repo move owner/repo target-owner --name new-name --json
 gd repo sync-github coolplayagent/relay-gitcode-cli --org plm-cac --private --json
 gd repo sync-github git@github.com:owner/repo.git --repo target-org/repo --if-exists skip --json
+gd repo sync-github owner/repo --repo target-org/repo --method git-push --if-exists update --json
 ```
 
 `gd repo move` moves a GitCode repository between users and organizations, or
@@ -115,10 +116,16 @@ GITCODE_TOKEN=... GD_E2E_SOURCE_REPO=owner/repo GD_E2E_TARGET_OWNER=target-owner
 ```
 
 `gd repo sync-github` accepts a GitHub `owner/repo`, HTTPS URL, or SSH URL and
-creates a GitCode repository with that GitHub repository as `import_url`.
+creates a GitCode repository with that GitHub repository as `import_url` by
+default.
 Without `--org` or `--repo`, it imports into the authenticated GitCode user
 namespace. Use `--org` for a GitCode organization and `--repo owner/name` for an
-explicit target path. Existing targets are skipped by default.
+explicit target path. Existing targets are skipped by default. Use `--method
+git-push` to create a regular GitCode repository and push GitHub branches and
+tags with Git instead of enabling Pull mirroring; this keeps the target writable
+for GitCode Release creation. Use `--if-exists update` to push refs to an
+existing regular target, or `--if-exists recreate` to delete and recreate the
+target.
 
 Manage issues and pull requests with the GitCode-backed command surface:
 

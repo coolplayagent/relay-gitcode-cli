@@ -1,9 +1,14 @@
-use std::{net::TcpListener, path::Path, time::Duration};
+use std::{
+    net::TcpListener,
+    path::{Path, PathBuf},
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 use anyhow::{Context, bail};
 use clap_complete::{Generator, Shell as CompleteShell, generate};
 use serde_json::{Map, Value, json};
 use tokio::io::AsyncReadExt;
+use tokio::process::Command as TokioCommand;
 
 use crate::{
     auth::CredentialStore,
@@ -89,7 +94,7 @@ pub async fn run(
                     Ok(())
                 }
                 Command::Repo(command) => {
-                    repo_command(command, &config, &client, json_output).await
+                    repo_command(command, &config, &client, token.as_deref(), json_output).await
                 }
                 Command::Issue(command) => {
                     issue_command(command, &config, &client, json_output).await
@@ -221,6 +226,7 @@ async fn repo_command(
     command: RepoCommand,
     config: &Config,
     client: &GitcodeClient,
+    token: Option<&str>,
     json_output: bool,
 ) -> anyhow::Result<()> {
     match command {
@@ -277,7 +283,7 @@ async fn repo_command(
             print_value(json_output, &value)
         }
         RepoCommand::SyncGithub(args) => {
-            let value = sync_github_repo(args, client).await?;
+            let value = sync_github_repo(args, config, client, token).await?;
             print_value(json_output, &value)
         }
     }
@@ -379,7 +385,9 @@ fn repository_name(repository: &str) -> Option<&str> {
 
 async fn sync_github_repo(
     args: crate::cli::RepoSyncGithubArgs,
+    config: &Config,
     client: &GitcodeClient,
+    token: Option<&str>,
 ) -> anyhow::Result<Value> {
     let github_repo = repo::parse_github_repo(&args.github_repo)?;
     let (_, github_name) = repo::split_repo(&github_repo)?;
@@ -392,24 +400,56 @@ async fn sync_github_repo(
     let target = repo_sync_target(&args, github_name, current_user.as_deref())?;
 
     if let Some(existing) = existing_gitcode_repo(client, &target.repository).await? {
-        if args.if_exists == crate::cli::RepoSyncIfExists::Skip {
-            return Ok(json!({
-                "action": "skipped_existing",
-                "source": {
-                    "provider": "github",
-                    "repository": github_repo,
-                    "import_url": import_url,
-                },
-                "target": {
-                    "repository": target.repository,
-                },
-                "repository": existing,
-            }));
+        match args.if_exists {
+            crate::cli::RepoSyncIfExists::Skip => {
+                return Ok(json!({
+                    "action": "skipped_existing",
+                    "method": repo_sync_method_name(args.method),
+                    "source": {
+                        "provider": "github",
+                        "repository": github_repo,
+                        "import_url": import_url,
+                    },
+                    "target": {
+                        "repository": target.repository,
+                    },
+                    "repository": existing,
+                }));
+            }
+            crate::cli::RepoSyncIfExists::Update => {
+                if args.method != crate::cli::RepoSyncMethod::GitPush {
+                    bail!("--if-exists update requires --method git-push");
+                }
+                let sync =
+                    push_github_repo(&github_repo, &target.repository, &config.hostname, token)
+                        .await?;
+                return Ok(json!({
+                    "action": "updated_existing",
+                    "method": repo_sync_method_name(args.method),
+                    "source": {
+                        "provider": "github",
+                        "repository": github_repo,
+                        "import_url": import_url,
+                    },
+                    "target": {
+                        "repository": target.repository,
+                    },
+                    "repository": existing,
+                    "sync": sync,
+                }));
+            }
+            crate::cli::RepoSyncIfExists::Recreate => {
+                client
+                    .delete(&format!("repos/{}", target.repository))
+                    .await?;
+            }
+            crate::cli::RepoSyncIfExists::Fail => {
+                bail!(
+                    "target GitCode repository already exists: {}",
+                    target.repository
+                );
+            }
         }
-        bail!(
-            "target GitCode repository already exists: {}",
-            target.repository
-        );
     }
 
     let description = args
@@ -419,15 +459,28 @@ async fn sync_github_repo(
         ("name", Some(target.name.clone())),
         ("description", Some(description)),
         ("private", Some(args.private.to_string())),
-        ("import_url", Some(import_url.clone())),
     ];
+    if args.method == crate::cli::RepoSyncMethod::Import {
+        fields.push(("import_url", Some(import_url.clone())));
+    }
     if target.create_endpoint.starts_with("orgs/") {
         fields.push(("path", Some(target.name.clone())));
     }
     let body = form_body(fields);
     let repository = client.post(&target.create_endpoint, &body).await?;
+    let sync = if args.method == crate::cli::RepoSyncMethod::GitPush {
+        Some(push_github_repo(&github_repo, &target.repository, &config.hostname, token).await?)
+    } else {
+        None
+    };
+    let action = if args.if_exists == crate::cli::RepoSyncIfExists::Recreate {
+        "recreated"
+    } else {
+        "created"
+    };
     Ok(json!({
-        "action": "created",
+        "action": action,
+        "method": repo_sync_method_name(args.method),
         "source": {
             "provider": "github",
             "repository": github_repo,
@@ -437,7 +490,220 @@ async fn sync_github_repo(
             "repository": target.repository,
         },
         "repository": repository,
+        "sync": sync,
     }))
+}
+
+fn repo_sync_method_name(method: crate::cli::RepoSyncMethod) -> &'static str {
+    match method {
+        crate::cli::RepoSyncMethod::Import => "import",
+        crate::cli::RepoSyncMethod::GitPush => "git-push",
+    }
+}
+
+async fn push_github_repo(
+    github_repo: &str,
+    gitcode_repo: &str,
+    gitcode_hostname: &str,
+    gitcode_token: Option<&str>,
+) -> anyhow::Result<Value> {
+    let Some(gitcode_token) = gitcode_token.filter(|token| !token.trim().is_empty()) else {
+        bail!("GitCode token is required for --method git-push");
+    };
+    let github_url = repo::github_clone_url(github_repo);
+    let gitcode_url = format!("https://{gitcode_hostname}/{gitcode_repo}.git");
+    let temp_dir = sync_temp_dir(gitcode_repo)?;
+    tokio::fs::create_dir_all(&temp_dir)
+        .await
+        .with_context(|| {
+            format!(
+                "failed to create temporary sync directory {}",
+                temp_dir.display()
+            )
+        })?;
+    let result = push_github_repo_inner(
+        &github_url,
+        &gitcode_url,
+        &temp_dir,
+        gitcode_token,
+        std::env::var("GITHUB_TOKEN").ok().as_deref(),
+    )
+    .await;
+    let cleanup = tokio::fs::remove_dir_all(&temp_dir).await.with_context(|| {
+        format!(
+            "failed to remove temporary sync directory {}",
+            temp_dir.display()
+        )
+    });
+    match (result, cleanup) {
+        (Ok(()), Ok(())) => {}
+        (Ok(()), Err(error)) => return Err(error),
+        (Err(error), Ok(())) => return Err(error),
+        (Err(error), Err(cleanup_error)) => {
+            return Err(error.context(format!(
+                "also failed to remove temporary sync directory {}: {cleanup_error}",
+                temp_dir.display()
+            )));
+        }
+    }
+    Ok(json!({
+        "source_url": github_url,
+        "target_url": gitcode_url,
+        "refs": ["refs/heads/*", "refs/tags/*"],
+    }))
+}
+
+async fn push_github_repo_inner(
+    github_url: &str,
+    gitcode_url: &str,
+    temp_dir: &Path,
+    gitcode_token: &str,
+    github_token: Option<&str>,
+) -> anyhow::Result<()> {
+    let repo_dir = temp_dir.join("repo.git");
+    let askpass = write_git_askpass(temp_dir).await?;
+    let mut envs = vec![
+        ("GIT_ASKPASS", askpass.to_string_lossy().to_string()),
+        ("GIT_TERMINAL_PROMPT", "0".to_string()),
+        ("GD_GITCODE_PASSWORD", gitcode_token.to_string()),
+    ];
+    if let Some(github_token) = github_token.filter(|token| !token.trim().is_empty()) {
+        envs.push(("GD_GITHUB_PASSWORD", github_token.to_string()));
+    }
+
+    run_git_command(
+        TokioCommand::new("git")
+            .arg("clone")
+            .arg("--bare")
+            .arg(github_url)
+            .arg(&repo_dir),
+        &envs,
+        "clone GitHub repository",
+    )
+    .await?;
+    run_git_command(
+        TokioCommand::new("git")
+            .arg("-C")
+            .arg(&repo_dir)
+            .arg("push")
+            .arg("--prune")
+            .arg(gitcode_url)
+            .arg("+refs/heads/*:refs/heads/*")
+            .arg("+refs/tags/*:refs/tags/*"),
+        &envs,
+        "push repository refs to GitCode",
+    )
+    .await
+}
+
+fn sync_temp_dir(gitcode_repo: &str) -> anyhow::Result<PathBuf> {
+    let safe_repo = gitcode_repo.replace(['/', '\\'], "-");
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .context("system clock is before UNIX_EPOCH")?
+        .as_millis();
+    Ok(std::env::temp_dir().join(format!(
+        "gd-sync-{safe_repo}-{}-{millis}",
+        std::process::id()
+    )))
+}
+
+async fn write_git_askpass(temp_dir: &Path) -> anyhow::Result<PathBuf> {
+    let path = temp_dir.join(askpass_file_name());
+    tokio::fs::write(&path, askpass_script())
+        .await
+        .with_context(|| format!("failed to write git askpass helper {}", path.display()))?;
+    set_askpass_permissions(&path).await?;
+    Ok(path)
+}
+
+#[cfg(unix)]
+fn askpass_file_name() -> &'static str {
+    "askpass.sh"
+}
+
+#[cfg(windows)]
+fn askpass_file_name() -> &'static str {
+    "askpass.cmd"
+}
+
+#[cfg(unix)]
+fn askpass_script() -> &'static str {
+    r#"#!/bin/sh
+case "$1" in
+  *github.com*Username*|*github.com*username*) printf '%s\n' "x-access-token" ;;
+  *github.com*Password*|*github.com*password*) printf '%s\n' "$GD_GITHUB_PASSWORD" ;;
+  *Username*|*username*) printf '%s\n' "gitcode" ;;
+  *) printf '%s\n' "$GD_GITCODE_PASSWORD" ;;
+esac
+"#
+}
+
+#[cfg(windows)]
+fn askpass_script() -> &'static str {
+    r#"@echo off
+echo %* | findstr /I "github.com" >nul
+if not errorlevel 1 (
+  echo %* | findstr /I "Username" >nul
+  if not errorlevel 1 (
+    echo x-access-token
+    exit /b 0
+  )
+  echo %GD_GITHUB_PASSWORD%
+  exit /b 0
+)
+echo %* | findstr /I "Username" >nul
+if not errorlevel 1 (
+  echo gitcode
+  exit /b 0
+)
+echo %GD_GITCODE_PASSWORD%
+"#
+}
+
+#[cfg(unix)]
+async fn set_askpass_permissions(path: &Path) -> anyhow::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mut permissions = tokio::fs::metadata(path)
+        .await
+        .with_context(|| format!("failed to stat git askpass helper {}", path.display()))?
+        .permissions();
+    permissions.set_mode(0o700);
+    tokio::fs::set_permissions(path, permissions)
+        .await
+        .with_context(|| format!("failed to chmod git askpass helper {}", path.display()))
+}
+
+#[cfg(windows)]
+async fn set_askpass_permissions(_path: &Path) -> anyhow::Result<()> {
+    Ok(())
+}
+
+async fn run_git_command(
+    command: &mut TokioCommand,
+    envs: &[(&str, String)],
+    action: &str,
+) -> anyhow::Result<()> {
+    for (key, value) in envs {
+        command.env(key, value);
+    }
+    let output = command
+        .output()
+        .await
+        .with_context(|| format!("failed to run git to {action}"))?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    bail!(
+        "git failed to {action} with status {}: {}{}{}",
+        output.status,
+        stderr.trim(),
+        if stdout.trim().is_empty() { "" } else { "\n" },
+        stdout.trim(),
+    );
 }
 
 struct RepoSyncTarget {

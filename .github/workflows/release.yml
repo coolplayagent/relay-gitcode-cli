@@ -525,7 +525,8 @@ jobs:
           cargo run --locked -- repo sync-github "${{ github.repository }}" \
             --repo plm-cac/relay-gitcode-cli \
             --private \
-            --if-exists skip \
+            --method git-push \
+            --if-exists update \
             --json
 
           cargo run --locked -- release migrate-github \

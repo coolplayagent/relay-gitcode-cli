@@ -580,6 +580,14 @@ pub struct RepoMoveArgs {
 pub enum RepoSyncIfExists {
     Fail,
     Skip,
+    Update,
+    Recreate,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum RepoSyncMethod {
+    Import,
+    GitPush,
 }
 
 #[derive(Debug, Args)]
@@ -597,6 +605,8 @@ pub struct RepoSyncGithubArgs {
     pub description: Option<String>,
     #[arg(long, value_enum, default_value_t = RepoSyncIfExists::Skip)]
     pub if_exists: RepoSyncIfExists,
+    #[arg(long, value_enum, default_value_t = RepoSyncMethod::Import)]
+    pub method: RepoSyncMethod,
 }
 
 #[derive(Debug, Subcommand)]
@@ -1257,6 +1267,33 @@ mod tests {
                 assert_eq!(args.name.as_deref(), Some("target-repo"));
                 assert!(args.private);
                 assert_eq!(args.if_exists, RepoSyncIfExists::Skip);
+                assert_eq!(args.method, RepoSyncMethod::Import);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_repo_sync_github_git_push_recreate() {
+        let cli = Cli::try_parse_from([
+            "gd",
+            "repo",
+            "sync-github",
+            "source/repo",
+            "--repo",
+            "target-org/target-repo",
+            "--method",
+            "git-push",
+            "--if-exists",
+            "recreate",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Command::Repo(RepoCommand::SyncGithub(args)) => {
+                assert_eq!(args.repository.as_deref(), Some("target-org/target-repo"));
+                assert_eq!(args.if_exists, RepoSyncIfExists::Recreate);
+                assert_eq!(args.method, RepoSyncMethod::GitPush);
             }
             other => panic!("unexpected command: {other:?}"),
         }
