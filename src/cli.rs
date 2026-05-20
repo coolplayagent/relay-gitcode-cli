@@ -528,6 +528,8 @@ pub enum RepoCommand {
     Fork(RepoRefArgs),
     #[command(about = "Create a repository")]
     Create(RepoCreateArgs),
+    #[command(about = "Move or rename a repository")]
+    Move(RepoMoveArgs),
     #[command(about = "Sync a GitHub repository into GitCode")]
     SyncGithub(RepoSyncGithubArgs),
 }
@@ -564,6 +566,14 @@ pub struct RepoCreateArgs {
     pub private: bool,
     #[arg(long)]
     pub description: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct RepoMoveArgs {
+    pub source: String,
+    pub target: String,
+    #[arg(long)]
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -1247,6 +1257,50 @@ mod tests {
                 assert_eq!(args.name.as_deref(), Some("target-repo"));
                 assert!(args.private);
                 assert_eq!(args.if_exists, RepoSyncIfExists::Skip);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_repo_move_target_path() {
+        let cli = Cli::try_parse_from([
+            "gd",
+            "repo",
+            "move",
+            "source-owner/source-repo",
+            "target-owner/target-repo",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Command::Repo(RepoCommand::Move(args)) => {
+                assert_eq!(args.source, "source-owner/source-repo");
+                assert_eq!(args.target, "target-owner/target-repo");
+                assert_eq!(args.name, None);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_repo_move_with_name_flag() {
+        let cli = Cli::try_parse_from([
+            "gd",
+            "repo",
+            "move",
+            "source-owner/source-repo",
+            "target-owner",
+            "--name",
+            "target-repo",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Command::Repo(RepoCommand::Move(args)) => {
+                assert_eq!(args.source, "source-owner/source-repo");
+                assert_eq!(args.target, "target-owner");
+                assert_eq!(args.name.as_deref(), Some("target-repo"));
             }
             other => panic!("unexpected command: {other:?}"),
         }

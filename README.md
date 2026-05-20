@@ -61,6 +61,7 @@ gd repo list owner
 gd repo clone owner/repo
 gd repo create name --private --description "demo"
 gd repo fork owner/repo
+gd repo move owner/repo target-owner/new-name
 gd repo sync-github coolplayagent/relay-gitcode-cli --org plm-cac --private
 
 gd issue list --repo owner/repo
@@ -136,6 +137,18 @@ verification is disabled by default for GitCode API calls.
 ```bash
 ./build.sh --debug
 ./check.sh
+```
+
+Optional repository move E2E testing is environment driven and should only use a
+disposable GitCode repository:
+
+```bash
+GD_BIN=target/debug/gd \
+GITCODE_TOKEN=... \
+GD_E2E_SOURCE_REPO=owner/repo \
+GD_E2E_TARGET_OWNER=target-owner \
+GD_E2E_TARGET_NAME=temporary-name \
+scripts/e2e-repo-move.sh
 ```
 
 The local quality gates are:

@@ -272,11 +272,109 @@ async fn repo_command(
             let value = client.post("user/repos", &body).await?;
             print_value(json_output, &value)
         }
+        RepoCommand::Move(args) => {
+            let value = move_repo(args, client).await?;
+            print_value(json_output, &value)
+        }
         RepoCommand::SyncGithub(args) => {
             let value = sync_github_repo(args, client).await?;
             print_value(json_output, &value)
         }
     }
+}
+
+async fn move_repo(
+    args: crate::cli::RepoMoveArgs,
+    client: &GitcodeClient,
+) -> anyhow::Result<Value> {
+    let (source_owner, source_name) = repo::split_repo(&args.source)?;
+    let source_repository = format!("{source_owner}/{source_name}");
+    let target = repo_move_target(&args.target, args.name)?;
+
+    if target.owner == source_owner && target.name.as_deref().unwrap_or(source_name) == source_name
+    {
+        bail!(
+            "repository is already at {source_repository}; pass a different target owner or name"
+        );
+    }
+
+    if target.owner == source_owner {
+        let Some(name) = target.name else {
+            bail!("repository is already owned by {source_owner}; pass --name to rename it");
+        };
+        let body = form_body([("name", Some(name.clone())), ("path", Some(name))]);
+        return client
+            .patch(&format!("repos/{source_repository}"), &body)
+            .await;
+    }
+
+    let requested_name = target.name.clone().filter(|name| name != source_name);
+    let body = form_body([
+        ("new_owner", Some(target.owner.clone())),
+        ("new_name", requested_name.clone()),
+    ]);
+    let mut value = client
+        .post(&format!("repos/{source_repository}/transfer"), &body)
+        .await?;
+
+    if let Some(name) = requested_name {
+        let moved_repository = repository_path_from_value(&value)
+            .unwrap_or_else(|| format!("{}/{source_name}", target.owner));
+        if repository_name(&moved_repository) != Some(name.as_str()) {
+            let body = form_body([("name", Some(name.clone())), ("path", Some(name))]);
+            value = client
+                .patch(&format!("repos/{moved_repository}"), &body)
+                .await?;
+        }
+    }
+
+    Ok(value)
+}
+
+struct RepoMoveTarget {
+    owner: String,
+    name: Option<String>,
+}
+
+fn repo_move_target(target: &str, explicit_name: Option<String>) -> anyhow::Result<RepoMoveTarget> {
+    let target = target.trim().trim_matches('/');
+    if target.is_empty() {
+        bail!("target owner must not be empty");
+    }
+
+    if target.contains('/') {
+        if explicit_name.is_some() {
+            bail!("use either target-owner/name or --name, not both");
+        }
+        let (owner, name) = repo::split_repo(target)?;
+        return Ok(RepoMoveTarget {
+            owner: owner.to_string(),
+            name: Some(name.to_string()),
+        });
+    }
+
+    Ok(RepoMoveTarget {
+        owner: target.to_string(),
+        name: explicit_name,
+    })
+}
+
+fn repository_path_from_value(value: &Value) -> Option<String> {
+    string_field(
+        value,
+        &["full_name", "path_with_namespace", "name_with_namespace"],
+    )
+    .and_then(|path| repo::split_repo(&path).is_ok().then_some(path))
+    .or_else(|| {
+        let owner = string_field(value, &["new_owner"])?;
+        let name = string_field(value, &["new_name"])?;
+        let path = format!("{owner}/{name}");
+        repo::split_repo(&path).is_ok().then_some(path)
+    })
+}
+
+fn repository_name(repository: &str) -> Option<&str> {
+    repo::split_repo(repository).ok().map(|(_, name)| name)
 }
 
 async fn sync_github_repo(

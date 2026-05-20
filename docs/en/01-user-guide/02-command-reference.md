@@ -27,9 +27,16 @@ gd repo list owner
 gd repo clone owner/repo
 gd repo create name --private --description "demo"
 gd repo fork owner/repo
+gd repo move owner/repo target-owner/new-name
+gd repo move owner/repo target-owner --name new-name
 gd repo sync-github coolplayagent/relay-gitcode-cli --org plm-cac --private
 gd repo sync-github git@github.com:owner/repo.git --repo target-org/repo --if-exists skip
 ```
+
+`gd repo move` moves a repository to another GitCode user or organization. Pass
+`target-owner/new-name` or `--name new-name` to rename during the move. When the
+target owner matches the current owner, `gd repo move` only renames the
+repository.
 
 `gd repo sync-github` creates a GitCode repository from a GitHub repository
 `import_url`. Without `--org` or `--repo`, it imports into the authenticated
