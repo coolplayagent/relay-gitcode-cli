@@ -25,6 +25,7 @@ use crate::{
         validate_file_content_source, validate_workflow_path, wait_for_oauth_callback,
         workflow_file_body,
     },
+    release_migration::{ReleaseMigrationOptions, migrate_github_releases},
     repo,
     update::{UpdateConfig, check_for_updates, render_version_check_text},
 };
@@ -100,7 +101,7 @@ pub async fn run(
                     label_command(command, &config, &client, json_output).await
                 }
                 Command::Release(command) => {
-                    release_command(command, &config, &client, json_output).await
+                    release_command(command, &config, &client, http.clone(), json_output).await
                 }
                 Command::Completion(_)
                 | Command::Version(_)
@@ -559,6 +560,7 @@ async fn release_command(
     command: ReleaseCommand,
     config: &Config,
     client: &GitcodeClient,
+    http: reqwest::Client,
     json_output: bool,
 ) -> anyhow::Result<()> {
     match command {
@@ -603,6 +605,32 @@ async fn release_command(
                 .post(&format!("repos/{repository}/releases"), &body)
                 .await?;
             print_value(json_output, &value)
+        }
+        ReleaseCommand::MigrateGithub(args) => {
+            let repository =
+                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())
+                    .await?;
+            let summary = migrate_github_releases(
+                http,
+                client,
+                ReleaseMigrationOptions {
+                    gitcode_repo: repository,
+                    github_repo: args.github_repo,
+                    tag: args.tag,
+                    all: args.all,
+                    skip_existing_assets: args.skip_existing_assets,
+                    update_release: args.update_release,
+                    dry_run: args.dry_run,
+                    github_token: std::env::var("GITHUB_TOKEN").ok(),
+                },
+            )
+            .await?;
+            if json_output {
+                print_json(&summary)
+            } else {
+                println!("{}", summary.text_summary());
+                Ok(())
+            }
         }
     }
 }

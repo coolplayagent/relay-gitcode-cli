@@ -14,7 +14,7 @@ The gate runs formatting, clippy with warnings denied, tests, and a build.
 - `Qodana`: Rust static analysis.
 - `Release`: version validation, package dry run, multi-platform binary builds,
   crate publishing, CLI skill packaging, archive upload, checksum generation,
-  and GitHub Release creation.
+  GitHub Release creation, and optional GitCode Release sync.
 
 GitHub Releases include `relay-gitcode-cli-skill-<tag>.tar.gz`, built from
 `skills/relay-gitcode-cli` with the same version as `Cargo.toml`. The release
@@ -27,6 +27,11 @@ published release artifact or ClawHub package, not from a local checkout.
 
 GitHub stores secret names in uppercase, so a `clawhub_token` secret created in
 the repository settings is available to the workflow as `CLAWHUB_TOKEN`.
+Configure `GITCODE_TOKEN` to let the release workflow run
+`gd release migrate-github` after GitHub Release publication. The token needs
+permission to create or update Releases and upload Release assets in
+`plm-cac/relay-gitcode-cli`. If `GITCODE_TOKEN` is absent, GitCode Release sync
+is skipped.
 
 ## GitCode Pipeline
 

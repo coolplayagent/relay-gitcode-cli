@@ -6,6 +6,7 @@ mod config;
 mod http;
 mod output;
 mod pipeline;
+mod release_migration;
 mod repo;
 mod update;
 

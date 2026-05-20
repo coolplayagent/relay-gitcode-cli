@@ -93,6 +93,7 @@ gd search users query
 gd ssh-key list
 gd label list --repo owner/repo
 gd release list --repo owner/repo
+gd release migrate-github --repo owner/repo --github-repo source/repo --tag v1.0.0
 gd version check
 gd completion bash
 ```

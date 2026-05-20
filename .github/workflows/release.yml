@@ -460,6 +460,53 @@ jobs:
             --notes-file release-notes.md \
             "${prerelease_args[@]}"
 
+  sync-gitcode-release:
+    name: Sync GitCode Release
+    if: always() && github.event_name == 'push' && needs.release.result == 'success'
+    needs:
+      - verify
+      - release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Check GitCode token
+        id: gitcode-token
+        env:
+          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${GITCODE_TOKEN:-}" ]]; then
+            echo "sync=false" >> "$GITHUB_OUTPUT"
+            echo "GITCODE_TOKEN is not configured; skipping GitCode Release sync."
+            exit 0
+          fi
+          echo "sync=true" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust toolchain
+        if: steps.gitcode-token.outputs.sync == 'true'
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Migrate GitHub Release to GitCode
+        if: steps.gitcode-token.outputs.sync == 'true'
+        env:
+          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo run --locked -- release migrate-github \
+            --repo plm-cac/relay-gitcode-cli \
+            --github-repo "${{ github.repository }}" \
+            --tag "${{ needs.verify.outputs.tag }}" \
+            --skip-existing-assets \
+            --update-release \
+            --json
+
   publish-skill:
     name: Publish ClawHub skill
     if: github.event_name == 'push'

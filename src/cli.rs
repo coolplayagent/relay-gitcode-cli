@@ -1,7 +1,7 @@
 use std::{collections::BTreeSet, ffi::OsStr, path::PathBuf};
 
 use clap::{
-    Arg, Args, CommandFactory, Parser, Subcommand, ValueEnum,
+    Arg, ArgAction, Args, CommandFactory, Parser, Subcommand, ValueEnum,
     error::{ContextKind, ContextValue},
 };
 
@@ -803,6 +803,8 @@ pub enum ReleaseCommand {
     View(ReleaseViewArgs),
     #[command(about = "Create a repository release")]
     Create(ReleaseCreateArgs),
+    #[command(about = "Migrate GitHub Releases and assets into GitCode")]
+    MigrateGithub(ReleaseMigrateGithubArgs),
 }
 
 #[derive(Debug, Args)]
@@ -831,6 +833,24 @@ pub struct ReleaseCreateArgs {
     pub notes: Option<String>,
     #[arg(long)]
     pub target: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct ReleaseMigrateGithubArgs {
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(long)]
+    pub github_repo: String,
+    #[arg(long, conflicts_with = "all")]
+    pub tag: Option<String>,
+    #[arg(long)]
+    pub all: bool,
+    #[arg(long, action = ArgAction::SetTrue, default_value_t = true)]
+    pub skip_existing_assets: bool,
+    #[arg(long, action = ArgAction::SetTrue, default_value_t = true)]
+    pub update_release: bool,
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -1363,6 +1383,38 @@ mod tests {
                 assert_eq!(args.endpoint, "/user");
                 assert_eq!(args.raw_fields, ["a=b"]);
                 assert_eq!(args.fields, ["n=2"]);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_release_migrate_github() {
+        let cli = Cli::try_parse_from([
+            "gd",
+            "release",
+            "migrate-github",
+            "--repo",
+            "owner/repo",
+            "--github-repo",
+            "source/repo",
+            "--tag",
+            "v1.0.0",
+            "--skip-existing-assets",
+            "--update-release",
+            "--dry-run",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Command::Release(ReleaseCommand::MigrateGithub(args)) => {
+                assert_eq!(args.repository.as_deref(), Some("owner/repo"));
+                assert_eq!(args.github_repo, "source/repo");
+                assert_eq!(args.tag.as_deref(), Some("v1.0.0"));
+                assert!(!args.all);
+                assert!(args.skip_existing_assets);
+                assert!(args.update_release);
+                assert!(args.dry_run);
             }
             other => panic!("unexpected command: {other:?}"),
         }

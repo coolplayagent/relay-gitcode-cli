@@ -126,6 +126,23 @@ gd api /repos/owner/repo -X PATCH -F has_issues=true --json
 gd api /repos/owner/repo/issues --paginate --json
 ```
 
+Manage GitCode Releases and migrate published GitHub Release assets into a
+GitCode Release when a GitCode repository mirrors GitHub source code:
+
+```bash
+gd release list --repo owner/repo --json
+gd release view v0.1.0 --repo owner/repo --json
+gd release create v0.1.0 --repo owner/repo --title "v0.1.0" --notes "Release notes" --json
+gd release migrate-github --repo owner/repo --github-repo source/repo --tag v0.1.0 --json
+gd release migrate-github --repo owner/repo --github-repo source/repo --all --dry-run --json
+```
+
+`gd release migrate-github` reads GitHub Release metadata and uploaded assets,
+then creates or updates GitCode Releases through GitCode Release APIs. It uses
+`GITHUB_TOKEN` when present for GitHub API reads, `GITCODE_TOKEN` or the system
+keyring for GitCode writes, and skips existing GitCode assets with matching
+names by default.
+
 ## Pipelines
 
 GitCode workflow commands use GitCode API credentials. OpenLibing gate commands
