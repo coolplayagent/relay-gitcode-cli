@@ -9,7 +9,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use url::Url;
 
-use crate::client::{ApiResponse, GitcodeClient};
+use crate::{
+    client::{ApiResponse, GitcodeClient},
+    encoding::encode_path_segment,
+};
 
 #[derive(Debug, Clone)]
 pub struct ReleaseMigrationOptions {
@@ -361,9 +364,9 @@ async fn gitcode_release_by_tag(
 }
 
 #[derive(Debug)]
-struct GitcodeReleaseUpload {
-    url: String,
-    headers: Vec<(String, String)>,
+pub(crate) struct GitcodeReleaseUpload {
+    pub(crate) url: String,
+    pub(crate) headers: Vec<(String, String)>,
 }
 
 async fn gitcode_release_upload(
@@ -434,7 +437,7 @@ fn collect_asset_names(value: &Value, names: &mut BTreeSet<String>) {
     }
 }
 
-fn extract_upload(response: &ApiResponse) -> Option<GitcodeReleaseUpload> {
+pub(crate) fn extract_upload(response: &ApiResponse) -> Option<GitcodeReleaseUpload> {
     let url = extract_upload_url_from_body(&response.body)
         .or_else(|| header_url(&response.headers, LOCATION))?;
     Some(GitcodeReleaseUpload {
@@ -528,18 +531,6 @@ fn accumulate(totals: &mut ReleaseMigrationTotals, record: &ReleaseMigrationReco
     }
 }
 
-fn encode_path_segment(value: &str) -> String {
-    let mut encoded = String::new();
-    for byte in value.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
-            encoded.push(byte as char);
-        } else {
-            encoded.push_str(&format!("%{byte:02X}"));
-        }
-    }
-    encoded
-}
-
 #[cfg(test)]
 mod tests {
     use reqwest::header::HeaderMap;
@@ -620,11 +611,5 @@ mod tests {
         let names = asset_names(&value);
         assert!(names.contains("a.tar.gz"));
         assert!(names.contains("b.zip"));
-    }
-
-    #[test]
-    fn encodes_path_segments() {
-        assert_eq!(encode_path_segment("v1.0.0"), "v1.0.0");
-        assert_eq!(encode_path_segment("release/one"), "release%2Fone");
     }
 }

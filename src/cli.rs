@@ -503,6 +503,12 @@ pub enum Command {
     #[command(about = "Manage repository labels")]
     #[command(subcommand)]
     Label(LabelCommand),
+    #[command(about = "Manage repository tags")]
+    #[command(subcommand)]
+    Tag(TagCommand),
+    #[command(about = "Manage repository milestones")]
+    #[command(subcommand)]
+    Milestone(MilestoneCommand),
     #[command(about = "Manage repository releases")]
     #[command(subcommand)]
     Release(ReleaseCommand),
@@ -594,6 +600,84 @@ pub enum RepoCommand {
     Move(RepoMoveArgs),
     #[command(about = "Sync a GitHub repository into GitCode")]
     SyncGithub(RepoSyncGithubArgs),
+    #[command(about = "Get a repository tree")]
+    Tree(RepoTreeArgs),
+    #[command(about = "Get repository contents at a path")]
+    Contents(RepoContentsArgs),
+    #[command(name = "file-list", about = "List repository files")]
+    FileList(RepoFileListArgs),
+    #[command(name = "file-create", about = "Create a repository file")]
+    FileCreate(RepoFileCreateArgs),
+    #[command(name = "file-update", about = "Update a repository file")]
+    FileUpdate(RepoFileUpdateArgs),
+    #[command(name = "file-delete", about = "Delete a repository file")]
+    FileDelete(RepoFileDeleteArgs),
+    #[command(about = "Get a repository blob")]
+    Blob(RepoBlobArgs),
+    #[command(about = "Get repository languages")]
+    Languages(RepoOnlyArgs),
+    #[command(about = "Get repository contributors")]
+    Contributors(RepoContributorsArgs),
+    #[command(name = "module-edit", about = "Set repository modules")]
+    ModuleEdit(RepoFieldsArgs),
+    #[command(name = "settings-edit", about = "Update repository settings")]
+    SettingsEdit(RepoFieldsArgs),
+    #[command(
+        name = "reviewer-edit",
+        about = "Update repository code review settings"
+    )]
+    ReviewerEdit(RepoFieldsArgs),
+    #[command(about = "Archive or unarchive a repository")]
+    Archive(RepoArchiveArgs),
+    #[command(about = "Delete a repository")]
+    Delete(RepoDeleteArgs),
+    #[command(about = "Get repository permission mode")]
+    Permission(RepoOnlyArgs),
+    #[command(name = "permission-edit", about = "Update repository permission mode")]
+    PermissionEdit(RepoFieldsArgs),
+    #[command(name = "push-rules", about = "Get repository push rules")]
+    PushRules(RepoOnlyArgs),
+    #[command(name = "push-rules-edit", about = "Set repository push rules")]
+    PushRulesEdit(RepoFieldsArgs),
+    #[command(about = "List repository forks")]
+    Forks(RepoPagedArgs),
+    #[command(name = "image-upload", about = "Upload an image to a repository")]
+    ImageUpload(RepoUploadArgs),
+    #[command(name = "file-upload", about = "Upload a file to a repository")]
+    FileUpload(RepoUploadArgs),
+    #[command(about = "List repository watchers")]
+    Subscribers(RepoPagedArgs),
+    #[command(about = "List repository stargazers")]
+    Stargazers(RepoPagedArgs),
+    #[command(about = "Get repository settings")]
+    Settings(RepoOnlyArgs),
+    #[command(
+        name = "repo-settings-edit",
+        about = "Update repository settings document"
+    )]
+    RepoSettingsEdit(RepoFieldsArgs),
+    #[command(name = "pr-settings", about = "Get repository pull request settings")]
+    PullRequestSettings(RepoOnlyArgs),
+    #[command(
+        name = "pr-settings-edit",
+        about = "Update repository pull request settings"
+    )]
+    PullRequestSettingsEdit(RepoFieldsArgs),
+    #[command(name = "member-role", about = "Update a repository member role")]
+    MemberRole(RepoMemberRoleArgs),
+    #[command(name = "custom-roles", about = "Get repository custom roles")]
+    CustomRoles(RepoOnlyArgs),
+    #[command(name = "download-stats", about = "Get repository download statistics")]
+    DownloadStats(RepoDownloadStatsArgs),
+    #[command(about = "Get raw repository file content")]
+    Raw(RepoRawArgs),
+    #[command(
+        name = "contributor-stats",
+        about = "Get repository contributor statistics"
+    )]
+    ContributorStats(RepoContributorStatsArgs),
+    #[command(about = "Get repository events")]
+    Events(RepoEventsArgs),
 }
 
 #[derive(Debug, Args)]
@@ -627,6 +711,8 @@ pub struct RepoRefArgs {
 #[derive(Debug, Args)]
 pub struct RepoCreateArgs {
     pub name: String,
+    #[arg(long)]
+    pub org: Option<String>,
     #[arg(long)]
     pub private: bool,
     #[arg(long)]
@@ -676,16 +762,281 @@ pub struct RepoSyncGithubArgs {
     pub method: RepoSyncMethod,
 }
 
+#[derive(Debug, Args)]
+pub struct RepoOnlyArgs {
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct RepoPagedArgs {
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(long, default_value_t = 1)]
+    pub page: u64,
+    #[arg(short = 'L', long = "limit", default_value_t = 30)]
+    pub limit: u64,
+}
+
+#[derive(Debug, Args)]
+pub struct RepoTreeArgs {
+    pub sha: String,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(long)]
+    pub recursive: bool,
+    #[arg(long, default_value_t = 1)]
+    pub page: u64,
+    #[arg(short = 'L', long = "limit", default_value_t = 100)]
+    pub limit: u64,
+}
+
+#[derive(Debug, Args)]
+pub struct RepoContentsArgs {
+    pub path: String,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(long = "ref")]
+    pub git_ref: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct RepoFileListArgs {
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(long)]
+    pub ref_name: Option<String>,
+    #[arg(long)]
+    pub file_name: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct RepoFileCreateArgs {
+    pub path: String,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(short = 'm', long)]
+    pub message: String,
+    #[arg(long, conflicts_with = "content_file")]
+    pub content: Option<String>,
+    #[arg(long = "content-file", conflicts_with = "content")]
+    pub content_file: Option<PathBuf>,
+    #[arg(long = "content-base64")]
+    pub content_base64: bool,
+    #[arg(long)]
+    pub branch: Option<String>,
+    #[arg(long)]
+    pub author_name: Option<String>,
+    #[arg(long)]
+    pub author_email: Option<String>,
+    #[arg(long)]
+    pub committer_name: Option<String>,
+    #[arg(long)]
+    pub committer_email: Option<String>,
+    #[arg(short = 'F', long = "field")]
+    pub fields: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct RepoFileUpdateArgs {
+    pub path: String,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(short = 'm', long)]
+    pub message: String,
+    #[arg(long)]
+    pub sha: String,
+    #[arg(long, conflicts_with = "content_file")]
+    pub content: Option<String>,
+    #[arg(long = "content-file", conflicts_with = "content")]
+    pub content_file: Option<PathBuf>,
+    #[arg(long = "content-base64")]
+    pub content_base64: bool,
+    #[arg(long)]
+    pub branch: Option<String>,
+    #[arg(long)]
+    pub author_name: Option<String>,
+    #[arg(long)]
+    pub author_email: Option<String>,
+    #[arg(long)]
+    pub committer_name: Option<String>,
+    #[arg(long)]
+    pub committer_email: Option<String>,
+    #[arg(short = 'F', long = "field")]
+    pub fields: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct RepoFileDeleteArgs {
+    pub path: String,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(long)]
+    pub sha: String,
+    #[arg(short = 'm', long)]
+    pub message: String,
+    #[arg(long)]
+    pub branch: Option<String>,
+    #[arg(short = 'F', long = "field")]
+    pub fields: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct RepoBlobArgs {
+    pub sha: String,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct RepoContributorsArgs {
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(short = 'L', long = "limit", default_value_t = 30)]
+    pub limit: u64,
+}
+
+#[derive(Debug, Args)]
+pub struct RepoFieldsArgs {
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(short = 'F', long = "field", required = true)]
+    pub fields: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct RepoArchiveArgs {
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(short = 'F', long = "field")]
+    pub fields: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct RepoDeleteArgs {
+    pub repository: String,
+}
+
+#[derive(Debug, Args)]
+pub struct RepoUploadArgs {
+    pub file: PathBuf,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(long)]
+    pub name: Option<String>,
+    #[arg(short = 'F', long = "field")]
+    pub fields: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct RepoMemberRoleArgs {
+    pub username: String,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(short = 'F', long = "field", required = true)]
+    pub fields: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct RepoDownloadStatsArgs {
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(long)]
+    pub start_date: Option<String>,
+    #[arg(long)]
+    pub end_date: Option<String>,
+    #[arg(long)]
+    pub direction: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct RepoRawArgs {
+    pub path: String,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(long = "ref")]
+    pub git_ref: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct RepoContributorStatsArgs {
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(long)]
+    pub author: Option<String>,
+    #[arg(long)]
+    pub current_user: bool,
+    #[arg(long)]
+    pub since: Option<String>,
+    #[arg(long)]
+    pub until: Option<String>,
+    #[arg(long)]
+    pub ref_name: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct RepoEventsArgs {
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(long)]
+    pub filter: Option<String>,
+    #[arg(long)]
+    pub author: Option<String>,
+    #[arg(long)]
+    pub before: Option<String>,
+    #[arg(long)]
+    pub after: Option<String>,
+    #[arg(long, default_value_t = 1)]
+    pub page: u64,
+    #[arg(short = 'L', long = "limit", default_value_t = 30)]
+    pub limit: u64,
+}
+
 #[derive(Debug, Subcommand)]
 pub enum IssueCommand {
     #[command(about = "List issues")]
     List(IssueListArgs),
+    #[command(about = "List issues assigned to or visible to the authenticated user")]
+    User(IssueUserListArgs),
+    #[command(about = "List organization issues visible to the authenticated user")]
+    Org(IssueOrgListArgs),
+    #[command(name = "enterprise-list", about = "List enterprise issues")]
+    EnterpriseList(IssueEnterpriseListArgs),
+    #[command(name = "enterprise-view", about = "View an enterprise issue")]
+    EnterpriseView(IssueEnterpriseViewArgs),
+    #[command(name = "enterprise-comments", about = "List enterprise issue comments")]
+    EnterpriseComments(IssueEnterpriseCommentsArgs),
+    #[command(name = "enterprise-labels", about = "List enterprise issue labels")]
+    EnterpriseLabels(IssueEnterpriseLabelsArgs),
     #[command(about = "View an issue")]
     View(IssueViewArgs),
     #[command(about = "Create an issue")]
     Create(IssueCreateArgs),
+    #[command(about = "Edit an issue")]
+    Edit(IssueEditArgs),
     #[command(about = "Add a comment to an issue")]
     Comment(IssueCommentArgs),
+    #[command(about = "List comments on an issue")]
+    Comments(IssueCommentsArgs),
+    #[command(
+        name = "repo-comments",
+        about = "List all issue comments in a repository"
+    )]
+    RepoComments(IssueRepoCommentsArgs),
+    #[command(name = "comment-view", about = "View an issue comment")]
+    CommentView(IssueCommentViewArgs),
+    #[command(name = "comment-edit", about = "Edit an issue comment")]
+    CommentEdit(IssueCommentEditArgs),
+    #[command(name = "comment-delete", about = "Delete an issue comment")]
+    CommentDelete(IssueCommentDeleteArgs),
+    #[command(about = "List pull requests associated with an issue")]
+    Prs(IssuePrsArgs),
+    #[command(name = "label-add", about = "Add labels to an issue")]
+    LabelAdd(IssueLabelAddArgs),
+    #[command(name = "label-remove", about = "Remove a label from an issue")]
+    LabelRemove(IssueLabelRemoveArgs),
+    #[command(about = "Get issue operation logs")]
+    Logs(IssueLogsArgs),
 }
 
 #[derive(Debug, Args)]
@@ -694,8 +1045,74 @@ pub struct IssueListArgs {
     pub repository: Option<String>,
     #[arg(short = 's', long, default_value = "open")]
     pub state: String,
+    #[arg(short = 'l', long)]
+    pub label: Vec<String>,
+    #[arg(long)]
+    pub sort: Option<String>,
+    #[arg(long)]
+    pub direction: Option<String>,
+    #[arg(long)]
+    pub milestone: Option<String>,
+    #[arg(short = 'a', long)]
+    pub assignee: Option<String>,
+    #[arg(long)]
+    pub creator: Option<String>,
+    #[arg(long)]
+    pub created_after: Option<String>,
+    #[arg(long)]
+    pub created_before: Option<String>,
+    #[arg(long)]
+    pub updated_after: Option<String>,
+    #[arg(long)]
+    pub updated_before: Option<String>,
     #[arg(short = 'L', long, default_value_t = 30)]
     pub limit: u32,
+}
+
+#[derive(Debug, Args)]
+pub struct IssueUserListArgs {
+    #[arg(short = 's', long)]
+    pub state: Option<String>,
+    #[arg(short = 'L', long = "limit", default_value_t = 30)]
+    pub limit: u64,
+}
+
+#[derive(Debug, Args)]
+pub struct IssueOrgListArgs {
+    pub org: String,
+    #[arg(short = 's', long)]
+    pub state: Option<String>,
+    #[arg(short = 'L', long = "limit", default_value_t = 30)]
+    pub limit: u64,
+}
+
+#[derive(Debug, Args)]
+pub struct IssueEnterpriseListArgs {
+    pub enterprise: String,
+    #[arg(short = 's', long)]
+    pub state: Option<String>,
+    #[arg(short = 'L', long = "limit", default_value_t = 30)]
+    pub limit: u64,
+}
+
+#[derive(Debug, Args)]
+pub struct IssueEnterpriseViewArgs {
+    pub enterprise: String,
+    pub number: u64,
+}
+
+#[derive(Debug, Args)]
+pub struct IssueEnterpriseCommentsArgs {
+    pub enterprise: String,
+    pub number: u64,
+    #[arg(short = 'L', long = "limit", default_value_t = 30)]
+    pub limit: u64,
+}
+
+#[derive(Debug, Args)]
+pub struct IssueEnterpriseLabelsArgs {
+    pub enterprise: String,
+    pub issue_id: u64,
 }
 
 #[derive(Debug, Args)]
@@ -717,6 +1134,31 @@ pub struct IssueCreateArgs {
     pub label: Vec<String>,
     #[arg(short = 'a', long)]
     pub assignee: Option<String>,
+    #[arg(long)]
+    pub milestone: Option<u64>,
+    #[arg(long)]
+    pub security_hole: Option<bool>,
+}
+
+#[derive(Debug, Args)]
+pub struct IssueEditArgs {
+    pub number: u64,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(short = 't', long)]
+    pub title: Option<String>,
+    #[arg(short = 'b', long)]
+    pub body: Option<String>,
+    #[arg(short = 's', long)]
+    pub state: Option<String>,
+    #[arg(short = 'a', long)]
+    pub assignee: Option<String>,
+    #[arg(long)]
+    pub milestone: Option<u64>,
+    #[arg(short = 'l', long)]
+    pub label: Vec<String>,
+    #[arg(long)]
+    pub security_hole: Option<bool>,
 }
 
 #[derive(Debug, Args)]
@@ -728,20 +1170,148 @@ pub struct IssueCommentArgs {
     pub body: String,
 }
 
+#[derive(Debug, Args)]
+pub struct IssueCommentsArgs {
+    pub number: u64,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(long, default_value_t = 1)]
+    pub page: u64,
+    #[arg(short = 'L', long = "limit", default_value_t = 30)]
+    pub limit: u64,
+}
+
+#[derive(Debug, Args)]
+pub struct IssueRepoCommentsArgs {
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(long, default_value_t = 1)]
+    pub page: u64,
+    #[arg(short = 'L', long = "limit", default_value_t = 30)]
+    pub limit: u64,
+}
+
+#[derive(Debug, Args)]
+pub struct IssueCommentViewArgs {
+    pub id: u64,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct IssueCommentEditArgs {
+    pub id: u64,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(short = 'b', long)]
+    pub body: String,
+}
+
+#[derive(Debug, Args)]
+pub struct IssueCommentDeleteArgs {
+    pub id: u64,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct IssuePrsArgs {
+    pub number: u64,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(short = 'L', long = "limit", default_value_t = 30)]
+    pub limit: u64,
+}
+
+#[derive(Debug, Args)]
+pub struct IssueLabelAddArgs {
+    pub number: u64,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(short = 'l', long = "label", required = true)]
+    pub labels: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct IssueLabelRemoveArgs {
+    pub number: u64,
+    pub name: String,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct IssueLogsArgs {
+    pub number: u64,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(long)]
+    pub sort: Option<String>,
+    #[arg(long, default_value_t = 1)]
+    pub page: u64,
+    #[arg(short = 'L', long = "limit", default_value_t = 30)]
+    pub limit: u64,
+}
+
 #[derive(Debug, Subcommand)]
 pub enum PrCommand {
     #[command(about = "List pull requests")]
     List(PrListArgs),
+    #[command(name = "org", about = "List organization pull requests")]
+    Org(PrOrgListArgs),
+    #[command(name = "enterprise", about = "List enterprise pull requests")]
+    Enterprise(PrEnterpriseListArgs),
+    #[command(
+        name = "enterprise-issue-prs",
+        about = "List pull requests linked to an enterprise issue"
+    )]
+    EnterpriseIssuePrs(PrEnterpriseIssuePrsArgs),
     #[command(about = "View a pull request")]
     View(PrViewArgs),
     #[command(about = "Create a pull request")]
     Create(PrCreateArgs),
+    #[command(about = "Edit a pull request")]
+    Edit(PrEditArgs),
+    #[command(about = "Merge a pull request")]
+    Merge(PrMergeArgs),
+    #[command(
+        name = "merge-status",
+        about = "Check whether a pull request is merged"
+    )]
+    MergeStatus(PrViewArgs),
+    #[command(about = "List pull request commits")]
+    Commits(PrPagedNumberArgs),
+    #[command(about = "List pull request files")]
+    Files(PrViewArgs),
+    #[command(about = "Get pull request file changes")]
+    Changes(PrViewArgs),
+    #[command(about = "List issues associated with a pull request")]
+    Issues(PrPagedNumberArgs),
+    #[command(about = "Get pull request operation logs")]
+    Logs(PrLogsArgs),
     #[command(about = "List pull request review comments")]
     Comments(PrCommentsArgs),
     #[command(about = "Add a pull request review comment")]
     Comment(PrCommentArgs),
     #[command(about = "Reply to a pull request review discussion")]
     Reply(PrReplyArgs),
+    #[command(name = "comment-view", about = "View a pull request comment")]
+    CommentView(PrCommentViewArgs),
+    #[command(name = "comment-edit", about = "Edit a pull request comment")]
+    CommentEdit(PrCommentEditArgs),
+    #[command(name = "comment-delete", about = "Delete a pull request comment")]
+    CommentDelete(PrCommentDeleteArgs),
+    #[command(name = "labels", about = "List labels on a pull request")]
+    Labels(PrViewArgs),
+    #[command(name = "label-add", about = "Add labels to a pull request")]
+    LabelAdd(PrLabelAddArgs),
+    #[command(name = "label-remove", about = "Remove a label from a pull request")]
+    LabelRemove(PrLabelRemoveArgs),
+    #[command(name = "label-replace", about = "Replace all labels on a pull request")]
+    LabelReplace(PrLabelAddArgs),
+    #[command(about = "Manage pull request approval and test state")]
+    #[command(subcommand)]
+    Review(PrReviewCommand),
 }
 
 #[derive(Debug, Args)]
@@ -752,8 +1322,42 @@ pub struct PrListArgs {
     pub state: String,
     #[arg(short = 'B', long)]
     pub base: Option<String>,
+    #[arg(long)]
+    pub sort: Option<String>,
+    #[arg(long)]
+    pub direction: Option<String>,
     #[arg(short = 'L', long, default_value_t = 30)]
     pub limit: u32,
+}
+
+#[derive(Debug, Args)]
+pub struct PrOrgListArgs {
+    pub org: String,
+    #[arg(short = 's', long)]
+    pub state: Option<String>,
+    #[arg(long)]
+    pub issue_number: Option<u64>,
+    #[arg(long)]
+    pub sort: Option<String>,
+    #[arg(long)]
+    pub direction: Option<String>,
+    #[arg(short = 'L', long = "limit", default_value_t = 30)]
+    pub limit: u64,
+}
+
+#[derive(Debug, Args)]
+pub struct PrEnterpriseListArgs {
+    pub enterprise: String,
+    #[arg(short = 's', long)]
+    pub state: Option<String>,
+    #[arg(short = 'L', long = "limit", default_value_t = 30)]
+    pub limit: u64,
+}
+
+#[derive(Debug, Args)]
+pub struct PrEnterpriseIssuePrsArgs {
+    pub enterprise: String,
+    pub number: u64,
 }
 
 #[derive(Debug, Args)]
@@ -779,6 +1383,61 @@ pub struct PrCreateArgs {
     pub label: Vec<String>,
     #[arg(short = 'a', long)]
     pub assignee: Vec<String>,
+    #[arg(long)]
+    pub tester: Vec<String>,
+    #[arg(long)]
+    pub milestone_number: Option<u64>,
+    #[arg(long)]
+    pub issue: Option<String>,
+    #[arg(long)]
+    pub prune_source_branch: bool,
+    #[arg(long)]
+    pub draft: bool,
+    #[arg(long)]
+    pub squash: bool,
+    #[arg(long)]
+    pub squash_commit_message: Option<String>,
+    #[arg(long)]
+    pub fork_path: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct PrEditArgs {
+    pub number: u64,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(short = 't', long)]
+    pub title: Option<String>,
+    #[arg(short = 'b', long)]
+    pub body: Option<String>,
+    #[arg(short = 's', long)]
+    pub state: Option<String>,
+    #[arg(long)]
+    pub milestone_number: Option<u64>,
+    #[arg(short = 'l', long)]
+    pub label: Vec<String>,
+    #[arg(long)]
+    pub draft: Option<bool>,
+}
+
+#[derive(Debug, Args)]
+pub struct PrMergeArgs {
+    pub number: u64,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(long, default_value = "merge")]
+    pub merge_method: String,
+}
+
+#[derive(Debug, Args)]
+pub struct PrPagedNumberArgs {
+    pub number: u64,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(long, default_value_t = 1)]
+    pub page: u64,
+    #[arg(short = 'L', long = "limit", default_value_t = 30)]
+    pub limit: u64,
 }
 
 #[derive(Debug, Args)]
@@ -790,6 +1449,10 @@ pub struct PrCommentsArgs {
     pub page: u64,
     #[arg(short = 'L', long = "limit", default_value_t = 30)]
     pub limit: u64,
+    #[arg(long)]
+    pub direction: Option<String>,
+    #[arg(long)]
+    pub comment_type: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -815,6 +1478,106 @@ pub struct PrReplyArgs {
     pub repository: Option<String>,
     #[arg(short = 'b', long)]
     pub body: String,
+}
+
+#[derive(Debug, Args)]
+pub struct PrLogsArgs {
+    pub number: u64,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(long)]
+    pub sort: Option<String>,
+    #[arg(long, default_value_t = 1)]
+    pub page: u64,
+    #[arg(short = 'L', long = "limit", default_value_t = 30)]
+    pub limit: u64,
+}
+
+#[derive(Debug, Args)]
+pub struct PrCommentViewArgs {
+    pub id: String,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct PrCommentEditArgs {
+    pub id: String,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(short = 'b', long)]
+    pub body: String,
+}
+
+#[derive(Debug, Args)]
+pub struct PrCommentDeleteArgs {
+    pub id: String,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct PrLabelAddArgs {
+    pub number: u64,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(short = 'l', long = "label", required = true)]
+    pub labels: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct PrLabelRemoveArgs {
+    pub number: u64,
+    pub name: String,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum PrReviewCommand {
+    #[command(about = "Approve a pull request")]
+    Approve(PrReviewProcessArgs),
+    #[command(about = "Mark pull request testing complete")]
+    Test(PrReviewProcessArgs),
+    #[command(name = "reset-approval", about = "Reset pull request approval status")]
+    ResetApproval(PrReviewResetArgs),
+    #[command(name = "reset-test", about = "Reset pull request test status")]
+    ResetTest(PrReviewResetArgs),
+    #[command(name = "assign-approver", about = "Assign pull request approvers")]
+    AssignApprover(PrReviewUsersArgs),
+    #[command(name = "cancel-approver", about = "Cancel pull request approvers")]
+    CancelApprover(PrReviewUsersArgs),
+    #[command(name = "assign-tester", about = "Assign pull request testers")]
+    AssignTester(PrReviewUsersArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct PrReviewProcessArgs {
+    pub number: u64,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(long)]
+    pub force: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct PrReviewResetArgs {
+    pub number: u64,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(long)]
+    pub reset_all: bool,
+    #[arg(short = 'u', long = "user")]
+    pub users: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct PrReviewUsersArgs {
+    pub number: u64,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(short = 'u', long = "user", required = true)]
+    pub users: Vec<String>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -908,13 +1671,148 @@ pub struct LabelDeleteArgs {
 }
 
 #[derive(Debug, Subcommand)]
+pub enum TagCommand {
+    #[command(about = "List repository tags")]
+    List(TagListArgs),
+    #[command(about = "Create a repository tag")]
+    Create(TagCreateArgs),
+    #[command(name = "protected-list", about = "List protected tags")]
+    ProtectedList(TagProtectedListArgs),
+    #[command(name = "protected-view", about = "View a protected tag")]
+    ProtectedView(TagProtectedViewArgs),
+    #[command(name = "protected-create", about = "Create a protected tag")]
+    ProtectedCreate(TagProtectedCreateArgs),
+    #[command(name = "protected-edit", about = "Update a protected tag")]
+    ProtectedEdit(TagProtectedCreateArgs),
+    #[command(name = "protected-delete", about = "Delete a protected tag")]
+    ProtectedDelete(TagProtectedViewArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct TagListArgs {
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(long, default_value_t = 1)]
+    pub page: u64,
+    #[arg(short = 'L', long = "limit", default_value_t = 30)]
+    pub limit: u64,
+}
+
+#[derive(Debug, Args)]
+pub struct TagCreateArgs {
+    pub tag_name: String,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(long = "ref", default_value = "main")]
+    pub refs: String,
+    #[arg(short = 'm', long)]
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct TagProtectedListArgs {
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(long, default_value_t = 1)]
+    pub page: u64,
+    #[arg(short = 'L', long = "limit", default_value_t = 30)]
+    pub limit: u64,
+}
+
+#[derive(Debug, Args)]
+pub struct TagProtectedViewArgs {
+    pub name: String,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct TagProtectedCreateArgs {
+    pub name: String,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(long, default_value_t = 40)]
+    pub create_access_level: u64,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum MilestoneCommand {
+    #[command(about = "List repository milestones")]
+    List(MilestoneListArgs),
+    #[command(about = "View a repository milestone")]
+    View(MilestoneViewArgs),
+    #[command(about = "Create a repository milestone")]
+    Create(MilestoneCreateArgs),
+    #[command(about = "Edit a repository milestone")]
+    Edit(MilestoneEditArgs),
+    #[command(about = "Delete a repository milestone")]
+    Delete(MilestoneViewArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct MilestoneListArgs {
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(short = 's', long, default_value = "open")]
+    pub state: String,
+    #[arg(long)]
+    pub sort: Option<String>,
+    #[arg(long)]
+    pub direction: Option<String>,
+    #[arg(long, default_value_t = 1)]
+    pub page: u64,
+    #[arg(short = 'L', long = "limit", default_value_t = 30)]
+    pub limit: u64,
+}
+
+#[derive(Debug, Args)]
+pub struct MilestoneViewArgs {
+    pub number: u64,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct MilestoneCreateArgs {
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(short = 't', long)]
+    pub title: String,
+    #[arg(short = 'd', long)]
+    pub description: Option<String>,
+    #[arg(long)]
+    pub due_on: String,
+}
+
+#[derive(Debug, Args)]
+pub struct MilestoneEditArgs {
+    pub number: u64,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(short = 't', long)]
+    pub title: Option<String>,
+    #[arg(short = 's', long)]
+    pub state: Option<String>,
+    #[arg(short = 'd', long)]
+    pub description: Option<String>,
+    #[arg(long)]
+    pub due_on: Option<String>,
+}
+
+#[derive(Debug, Subcommand)]
 pub enum ReleaseCommand {
     #[command(about = "List repository releases")]
     List(ReleaseListArgs),
     #[command(about = "View a repository release")]
     View(ReleaseViewArgs),
+    #[command(name = "view-id", about = "View a repository release by id")]
+    ViewId(ReleaseViewIdArgs),
     #[command(about = "Create a repository release")]
     Create(ReleaseCreateArgs),
+    #[command(about = "Edit a repository release")]
+    Edit(ReleaseEditArgs),
+    #[command(about = "Upload an asset to a repository release")]
+    Upload(ReleaseUploadArgs),
     #[command(about = "Migrate GitHub Releases and assets into GitCode")]
     MigrateGithub(ReleaseMigrateGithubArgs),
 }
@@ -945,6 +1843,44 @@ pub struct ReleaseCreateArgs {
     pub notes: Option<String>,
     #[arg(long)]
     pub target: Option<String>,
+    #[arg(long)]
+    pub prerelease: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct ReleaseViewIdArgs {
+    pub id: u64,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct ReleaseEditArgs {
+    pub id: u64,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(long)]
+    pub tag: Option<String>,
+    #[arg(short = 't', long)]
+    pub title: Option<String>,
+    #[arg(short = 'n', long)]
+    pub notes: Option<String>,
+    #[arg(long)]
+    pub target: Option<String>,
+    #[arg(long)]
+    pub prerelease: Option<bool>,
+}
+
+#[derive(Debug, Args)]
+pub struct ReleaseUploadArgs {
+    pub tag: String,
+    pub file: PathBuf,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(long)]
+    pub name: Option<String>,
+    #[arg(long)]
+    pub content_type: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -1742,6 +2678,213 @@ mod tests {
                 assert_eq!(args.number, 7);
                 assert_eq!(args.discussion_id, "discussion-1");
                 assert_eq!(args.body, "done");
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_repo_api_completion_commands() {
+        let file_create = Cli::try_parse_from([
+            "gd",
+            "repo",
+            "file-create",
+            "README.md",
+            "--repo",
+            "owner/repo",
+            "--message",
+            "init",
+            "--content",
+            "hello",
+            "--branch",
+            "main",
+            "--field",
+            "start_branch=main",
+        ])
+        .unwrap();
+        match file_create.command {
+            Command::Repo(RepoCommand::FileCreate(args)) => {
+                assert_eq!(args.path, "README.md");
+                assert_eq!(args.repository.as_deref(), Some("owner/repo"));
+                assert_eq!(args.message, "init");
+                assert_eq!(args.content.as_deref(), Some("hello"));
+                assert_eq!(args.fields, ["start_branch=main"]);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        let stats = Cli::try_parse_from([
+            "gd",
+            "repo",
+            "contributor-stats",
+            "--repo",
+            "owner/repo",
+            "--current-user",
+            "--since",
+            "2026-01-01",
+        ])
+        .unwrap();
+        match stats.command {
+            Command::Repo(RepoCommand::ContributorStats(args)) => {
+                assert!(args.current_user);
+                assert_eq!(args.since.as_deref(), Some("2026-01-01"));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_issue_completion_commands() {
+        let edit = Cli::try_parse_from([
+            "gd",
+            "issue",
+            "edit",
+            "9",
+            "--repo",
+            "owner/repo",
+            "--title",
+            "new",
+            "--state",
+            "close",
+            "--label",
+            "bug",
+        ])
+        .unwrap();
+        match edit.command {
+            Command::Issue(IssueCommand::Edit(args)) => {
+                assert_eq!(args.number, 9);
+                assert_eq!(args.title.as_deref(), Some("new"));
+                assert_eq!(args.state.as_deref(), Some("close"));
+                assert_eq!(args.label, ["bug"]);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        let comment_edit = Cli::try_parse_from([
+            "gd",
+            "issue",
+            "comment-edit",
+            "123",
+            "--repo",
+            "owner/repo",
+            "--body",
+            "updated",
+        ])
+        .unwrap();
+        match comment_edit.command {
+            Command::Issue(IssueCommand::CommentEdit(args)) => {
+                assert_eq!(args.id, 123);
+                assert_eq!(args.body, "updated");
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_pr_completion_commands() {
+        let merge = Cli::try_parse_from([
+            "gd",
+            "pr",
+            "merge",
+            "7",
+            "--repo",
+            "owner/repo",
+            "--merge-method",
+            "squash",
+        ])
+        .unwrap();
+        match merge.command {
+            Command::Pr(PrCommand::Merge(args)) => {
+                assert_eq!(args.number, 7);
+                assert_eq!(args.merge_method, "squash");
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        let review = Cli::try_parse_from([
+            "gd",
+            "pr",
+            "review",
+            "assign-approver",
+            "7",
+            "--repo",
+            "owner/repo",
+            "--user",
+            "alice",
+            "--user",
+            "bob",
+        ])
+        .unwrap();
+        match review.command {
+            Command::Pr(PrCommand::Review(PrReviewCommand::AssignApprover(args))) => {
+                assert_eq!(args.number, 7);
+                assert_eq!(args.users, ["alice", "bob"]);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_tag_milestone_and_release_completion_commands() {
+        let tag = Cli::try_parse_from([
+            "gd",
+            "tag",
+            "protected-create",
+            "v*",
+            "--repo",
+            "owner/repo",
+            "--create-access-level",
+            "30",
+        ])
+        .unwrap();
+        match tag.command {
+            Command::Tag(TagCommand::ProtectedCreate(args)) => {
+                assert_eq!(args.name, "v*");
+                assert_eq!(args.create_access_level, 30);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        let milestone = Cli::try_parse_from([
+            "gd",
+            "milestone",
+            "create",
+            "--repo",
+            "owner/repo",
+            "--title",
+            "v1",
+            "--due-on",
+            "2026-06-01",
+        ])
+        .unwrap();
+        match milestone.command {
+            Command::Milestone(MilestoneCommand::Create(args)) => {
+                assert_eq!(args.title, "v1");
+                assert_eq!(args.due_on, "2026-06-01");
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        let release = Cli::try_parse_from([
+            "gd",
+            "release",
+            "edit",
+            "42",
+            "--repo",
+            "owner/repo",
+            "--tag",
+            "v1.0.0",
+            "--title",
+            "v1",
+            "--prerelease",
+            "true",
+        ])
+        .unwrap();
+        match release.command {
+            Command::Release(ReleaseCommand::Edit(args)) => {
+                assert_eq!(args.id, 42);
+                assert_eq!(args.tag.as_deref(), Some("v1.0.0"));
+                assert_eq!(args.prerelease, Some(true));
             }
             other => panic!("unexpected command: {other:?}"),
         }

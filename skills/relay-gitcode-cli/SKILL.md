@@ -109,6 +109,14 @@ gd repo move owner/repo target-owner --name new-name --json
 gd repo sync-github coolplayagent/relay-gitcode-cli --org plm-cac --private --json
 gd repo sync-github git@github.com:owner/repo.git --repo target-org/repo --if-exists skip --json
 gd repo sync-github owner/repo --repo target-org/repo --method git-push --if-exists update --json
+gd repo contents README.md --repo owner/repo --ref main --json
+gd repo file-create README.md --repo owner/repo --message "init" --content "hello" --json
+gd repo file-update README.md --repo owner/repo --message "update" --sha blob-sha --content-file README.md --json
+gd repo settings-edit --repo owner/repo --field has_issues=true --json
+gd repo pr-settings --repo owner/repo --json
+gd repo push-rules --repo owner/repo --json
+gd repo contributor-stats --repo owner/repo --current-user --json
+gd repo events --repo owner/repo --filter push --json
 ```
 
 `gd repo move` moves a GitCode repository between users and organizations, or
@@ -137,15 +145,35 @@ Manage issues and pull requests with the GitCode-backed command surface:
 gd issue list --repo owner/repo --state open --limit 30 --json
 gd issue view 1 --repo owner/repo --json
 gd issue create --repo owner/repo --title "bug" --body "details" --json
+gd issue edit 1 --repo owner/repo --state close --json
 gd issue comment 1 --repo owner/repo --body "thanks" --json
+gd issue comments 1 --repo owner/repo --json
+gd issue comment-edit 123 --repo owner/repo --body "updated" --json
+gd issue label-add 1 --repo owner/repo --label bug --json
+gd issue prs 1 --repo owner/repo --json
+gd issue logs 1 --repo owner/repo --json
 
 gd pr list --repo owner/repo --state open --base main --json
 gd pr view 1 --repo owner/repo --json
 gd pr create --repo owner/repo --title "change" --body "details" --base main --head feature --json
+gd pr edit 1 --repo owner/repo --title "new title" --json
+gd pr merge 1 --repo owner/repo --merge-method squash --json
+gd pr commits 1 --repo owner/repo --json
+gd pr files 1 --repo owner/repo --json
+gd pr changes 1 --repo owner/repo --json
+gd pr issues 1 --repo owner/repo --json
 gd pr comments 1 --repo owner/repo --limit 50 --json
 gd pr comment 1 --repo owner/repo --body "please fix" --path src/main.rs --position 3 --need-to-resolve --json
 gd pr reply 1 discussion-id --repo owner/repo --body "fixed" --json
+gd pr label-add 1 --repo owner/repo --label bug --json
+gd pr review approve 1 --repo owner/repo --json
+gd pr review assign-approver 1 --repo owner/repo --user alice --json
 ```
+
+For broad GitCode settings payloads, pass repeated `--field key=value` entries.
+Boolean, numeric, and `null` values are sent as JSON scalars; other values are
+sent as strings. GitCode PR review is exposed through `gd pr review` approval
+and tester subcommands.
 
 Use `gd api` for GitCode API v5 endpoints that do not have first-class
 subcommands:
@@ -163,9 +191,24 @@ GitCode Release when a GitCode repository mirrors GitHub source code:
 gd release list --repo owner/repo --json
 gd release view v0.1.0 --repo owner/repo --json
 gd release create v0.1.0 --repo owner/repo --title "v0.1.0" --notes "Release notes" --json
+gd release edit 1 --repo owner/repo --title "v0.1.0" --json
+gd release upload v0.1.0 dist/app.tar.gz --repo owner/repo --json
 gd release migrate-github --repo owner/repo --github-repo source/repo --tag v0.1.0 --json
 gd release migrate-github --repo owner/repo --github-repo source/repo --all --dry-run --json
 gd release migrate-github --repo owner/repo --github-repo source/repo --tag v0.1.0 --update-release=false --skip-existing-assets=false --json
+```
+
+Manage tags and milestones directly when GitCode exposes equivalent API
+behavior:
+
+```bash
+gd tag list --repo owner/repo --json
+gd tag create v0.1.0 --repo owner/repo --ref main --message "v0.1.0" --json
+gd tag protected-list --repo owner/repo --json
+gd tag protected-create "v*" --repo owner/repo --create-access-level 30 --json
+gd milestone list --repo owner/repo --json
+gd milestone create --repo owner/repo --title v1 --due-on 2026-06-01 --json
+gd milestone edit 1 --repo owner/repo --state closed --json
 ```
 
 `gd release migrate-github` reads GitHub Release metadata and uploaded assets,

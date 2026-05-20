@@ -65,18 +65,30 @@ gd repo fork owner/repo
 gd repo move owner/repo target-owner/new-name
 gd repo sync-github coolplayagent/relay-gitcode-cli --org plm-cac --private
 gd repo sync-github coolplayagent/relay-gitcode-cli --repo plm-cac/relay-gitcode-cli --method git-push --if-exists update --private
+gd repo contents README.md --repo owner/repo --ref main
+gd repo file-create README.md --repo owner/repo --message "init" --content "hello"
+gd repo settings-edit --repo owner/repo --field has_issues=true
+gd repo push-rules --repo owner/repo
+gd repo events --repo owner/repo --filter push
 
 gd issue list --repo owner/repo
 gd issue view 1 --repo owner/repo
 gd issue create --repo owner/repo --title "bug" --body "details"
+gd issue edit 1 --repo owner/repo --state close
 gd issue comment 1 --repo owner/repo --body "thanks"
+gd issue comments 1 --repo owner/repo
+gd issue label-add 1 --repo owner/repo --label bug
 
 gd pr list --repo owner/repo
 gd pr view 1 --repo owner/repo
 gd pr create --repo owner/repo --title "change" --body "details" --base main --head feature
+gd pr merge 1 --repo owner/repo
+gd pr commits 1 --repo owner/repo
+gd pr files 1 --repo owner/repo
 gd pr comments 1 --repo owner/repo --limit 50
 gd pr comment 1 --repo owner/repo --body "please fix" --path src/main.rs --position 3
 gd pr reply 1 discussion-id --repo owner/repo --body "fixed"
+gd pr review approve 1 --repo owner/repo
 
 gd pipeline set --repo owner/repo .gitcode/workflows/ci.yml --file workflow.yml
 gd pipeline codecheck --repo owner/repo --language SHELL --access-token-secret CODECHECK_ACCESS_TOKEN
@@ -99,7 +111,10 @@ gd search issues query
 gd search users query
 gd ssh-key list
 gd label list --repo owner/repo
+gd tag list --repo owner/repo
+gd milestone list --repo owner/repo
 gd release list --repo owner/repo
+gd release edit 1 --repo owner/repo --title v1.0.0
 gd release migrate-github --repo owner/repo --github-repo source/repo --tag v1.0.0
 gd release migrate-github --repo owner/repo --github-repo source/repo --tag v1.0.0 --update-release=false --skip-existing-assets=false
 gd version check

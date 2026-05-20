@@ -444,6 +444,746 @@ fn gd_pr_comment_and_reply_use_gitcode_bearer_token() {
 }
 
 #[test]
+fn gd_pr_review_commands_send_parameters_in_json_bodies() {
+    let server = MockServer::spawn(4, |request| {
+        match (request.method(), request.path_without_query()) {
+            ("POST", "/api/v5/repos/owner/repo/pulls/7/review")
+            | ("PATCH", "/api/v5/repos/owner/repo/pulls/7/assignees")
+            | ("DELETE", "/api/v5/repos/owner/repo/pulls/7/assignees")
+            | ("POST", "/api/v5/repos/owner/repo/pulls/7/testers") => MockResponse {
+                status: 200,
+                body: r#"{"ok":true}"#,
+            },
+            _ => MockResponse {
+                status: 404,
+                body: r#"{"message":"unexpected request"}"#,
+            },
+        }
+    });
+    let config_dir = tempfile::tempdir().expect("create temporary config dir");
+    let api_base = format!("{}/api/v5", server.base_url());
+    let config_path = config_dir.path().join("config.json");
+
+    let commands = [
+        vec![
+            "pr",
+            "review",
+            "approve",
+            "7",
+            "--repo",
+            "owner/repo",
+            "--force",
+            "--json",
+        ],
+        vec![
+            "pr",
+            "review",
+            "reset-approval",
+            "7",
+            "--repo",
+            "owner/repo",
+            "--reset-all",
+            "--user",
+            "alice",
+            "--user",
+            "bob",
+            "--json",
+        ],
+        vec![
+            "pr",
+            "review",
+            "cancel-approver",
+            "7",
+            "--repo",
+            "owner/repo",
+            "--user",
+            "alice",
+            "--user",
+            "bob",
+            "--json",
+        ],
+        vec![
+            "pr",
+            "review",
+            "assign-tester",
+            "7",
+            "--repo",
+            "owner/repo",
+            "--user",
+            "qa",
+            "--json",
+        ],
+    ];
+    let outputs = commands
+        .into_iter()
+        .map(|args| {
+            let mut command = gd_command();
+            command
+                .env("GITCODE_TOKEN", "integration-token")
+                .env("GD_CONFIG_PATH", &config_path)
+                .arg("--api-base")
+                .arg(&api_base)
+                .args(args)
+                .output()
+                .expect("run gd pr review command")
+        })
+        .collect::<Vec<_>>();
+
+    let requests = server.finish();
+    for output in &outputs {
+        assert_command_success(output, &requests);
+    }
+    assert_eq!(requests.len(), 4);
+    assert!(requests.iter().all(|request| {
+        !["force=", "reset_all=", "assignees=", "testers="]
+            .iter()
+            .any(|parameter| request.path().contains(parameter))
+    }));
+    assert!(requests.iter().any(|request| {
+        request.path_without_query() == "/api/v5/repos/owner/repo/pulls/7/review"
+            && request.body.contains(r#""force":true"#)
+    }));
+    assert!(requests.iter().any(|request| {
+        request.path_without_query() == "/api/v5/repos/owner/repo/pulls/7/assignees"
+            && request.method() == "PATCH"
+            && request.body.contains(r#""reset_all":true"#)
+            && request.body.contains(r#""assignees":"alice,bob""#)
+    }));
+    assert!(requests.iter().any(|request| {
+        request.path_without_query() == "/api/v5/repos/owner/repo/pulls/7/assignees"
+            && request.method() == "DELETE"
+            && request.body.contains(r#""assignees":"alice,bob""#)
+    }));
+    assert!(requests.iter().any(|request| {
+        request.path_without_query() == "/api/v5/repos/owner/repo/pulls/7/testers"
+            && request.body.contains(r#""testers":"qa""#)
+    }));
+}
+
+#[test]
+fn gd_repo_image_upload_uses_base64_json_payload() {
+    let server = MockServer::spawn(1, |request| {
+        if request.method() == "POST"
+            && request.path_without_query() == "/api/v5/repos/owner/repo/img/upload"
+        {
+            MockResponse {
+                status: 200,
+                body: r#"{"url":"https://gitcode.com/uploads/avatar.png"}"#,
+            }
+        } else {
+            MockResponse {
+                status: 404,
+                body: r#"{"message":"unexpected request"}"#,
+            }
+        }
+    });
+    let config_dir = tempfile::tempdir().expect("create temporary config dir");
+    let upload_dir = tempfile::tempdir().expect("create temporary upload dir");
+    let image_path = upload_dir.path().join("avatar.png");
+    std::fs::write(&image_path, b"image-bytes").expect("write image fixture");
+    let api_base = format!("{}/api/v5", server.base_url());
+
+    let mut command = gd_command();
+    let output = command
+        .env("GITCODE_TOKEN", "integration-token")
+        .env("GD_CONFIG_PATH", config_dir.path().join("config.json"))
+        .arg("--api-base")
+        .arg(&api_base)
+        .args([
+            "repo",
+            "image-upload",
+            image_path.to_str().unwrap(),
+            "--repo",
+            "owner/repo",
+            "--name",
+            "avatar.png",
+            "--field",
+            "folder=docs",
+            "--json",
+        ])
+        .output()
+        .expect("run gd repo image-upload");
+
+    let requests = server.finish();
+    assert_command_success(&output, &requests);
+    assert_eq!(requests.len(), 1);
+    let request = &requests[0];
+    assert_eq!(
+        request.path_without_query(),
+        "/api/v5/repos/owner/repo/img/upload"
+    );
+    assert!(request.header("content-type").is_some_and(|value| {
+        value.starts_with("application/json") && !value.contains("multipart")
+    }));
+    assert!(
+        request
+            .body
+            .contains(&format!(r#""body":"{}""#, STANDARD.encode(b"image-bytes")))
+    );
+    assert!(request.body.contains(r#""file_name":"avatar.png""#));
+    assert!(request.body.contains(r#""folder":"docs""#));
+}
+
+#[test]
+fn gd_release_upload_encodes_tag_path_segment() {
+    let upload_server = MockServer::spawn(1, |request| {
+        if request.method() == "POST" && request.path_without_query() == "/upload" {
+            MockResponse {
+                status: 200,
+                body: r#"{"name":"app.tar.gz"}"#,
+            }
+        } else {
+            MockResponse {
+                status: 404,
+                body: r#"{"message":"unexpected upload request"}"#,
+            }
+        }
+    });
+    let upload_url = format!("{}/upload", upload_server.base_url());
+    let upload_url_body: &'static str =
+        Box::leak(format!(r#"{{"upload_url":"{upload_url}"}}"#).into_boxed_str());
+    let api_server = MockServer::spawn(1, move |request| {
+        if request.method() == "GET"
+            && request.path_without_query()
+                == "/api/v5/repos/owner/repo/releases/release%2Fv1.2.0/upload_url"
+        {
+            MockResponse {
+                status: 200,
+                body: upload_url_body,
+            }
+        } else {
+            MockResponse {
+                status: 404,
+                body: r#"{"message":"unexpected API request"}"#,
+            }
+        }
+    });
+    let config_dir = tempfile::tempdir().expect("create temporary config dir");
+    let asset_dir = tempfile::tempdir().expect("create temporary asset dir");
+    let asset_path = asset_dir.path().join("app.tar.gz");
+    std::fs::write(&asset_path, b"asset-bytes").expect("write asset fixture");
+    let api_base = format!("{}/api/v5", api_server.base_url());
+
+    let mut command = gd_command();
+    let output = command
+        .env("GITCODE_TOKEN", "integration-token")
+        .env("GD_CONFIG_PATH", config_dir.path().join("config.json"))
+        .arg("--api-base")
+        .arg(&api_base)
+        .args([
+            "release",
+            "upload",
+            "release/v1.2.0",
+            asset_path.to_str().unwrap(),
+            "--repo",
+            "owner/repo",
+            "--name",
+            "app.tar.gz",
+            "--json",
+        ])
+        .output()
+        .expect("run gd release upload");
+
+    let api_requests = api_server.finish();
+    let upload_requests = upload_server.finish();
+    assert_command_success(&output, &api_requests);
+    assert_eq!(api_requests.len(), 1);
+    assert_eq!(
+        api_requests[0].path_without_query(),
+        "/api/v5/repos/owner/repo/releases/release%2Fv1.2.0/upload_url"
+    );
+    assert_eq!(upload_requests.len(), 1);
+    assert_eq!(upload_requests[0].path_without_query(), "/upload");
+}
+
+#[test]
+fn gd_release_upload_uses_signed_upload_headers() {
+    let upload_server = MockServer::spawn(1, |request| {
+        if request.method() == "PUT"
+            && request.path_without_query() == "/signed-upload"
+            && request.header("x-upload-token") == Some("signed")
+            && request.body == "asset-bytes"
+        {
+            MockResponse {
+                status: 200,
+                body: r#"{"name":"app.tar.gz"}"#,
+            }
+        } else {
+            MockResponse {
+                status: 404,
+                body: r#"{"message":"unexpected upload request"}"#,
+            }
+        }
+    });
+    let upload_url = format!("{}/signed-upload", upload_server.base_url());
+    let upload_url_body: &'static str = Box::leak(
+        format!(r#"{{"upload_url":"{upload_url}","headers":{{"X-Upload-Token":"signed"}}}}"#)
+            .into_boxed_str(),
+    );
+    let api_server = MockServer::spawn(1, move |request| {
+        if request.method() == "GET"
+            && request.path_without_query() == "/api/v5/repos/owner/repo/releases/v1.2.0/upload_url"
+            && request.path().contains("file_name=app.tar.gz")
+        {
+            MockResponse {
+                status: 200,
+                body: upload_url_body,
+            }
+        } else {
+            MockResponse {
+                status: 404,
+                body: r#"{"message":"unexpected API request"}"#,
+            }
+        }
+    });
+    let config_dir = tempfile::tempdir().expect("create temporary config dir");
+    let asset_dir = tempfile::tempdir().expect("create temporary asset dir");
+    let asset_path = asset_dir.path().join("app.tar.gz");
+    std::fs::write(&asset_path, b"asset-bytes").expect("write asset fixture");
+    let api_base = format!("{}/api/v5", api_server.base_url());
+
+    let mut command = gd_command();
+    let output = command
+        .env("GITCODE_TOKEN", "integration-token")
+        .env("GD_CONFIG_PATH", config_dir.path().join("config.json"))
+        .arg("--api-base")
+        .arg(&api_base)
+        .args([
+            "release",
+            "upload",
+            "v1.2.0",
+            asset_path.to_str().unwrap(),
+            "--repo",
+            "owner/repo",
+            "--name",
+            "app.tar.gz",
+            "--content-type",
+            "application/gzip",
+            "--json",
+        ])
+        .output()
+        .expect("run gd release upload");
+
+    let api_requests = api_server.finish();
+    let upload_requests = upload_server.finish();
+    assert_command_success(&output, &api_requests);
+    assert_eq!(api_requests.len(), 1);
+    assert_eq!(upload_requests.len(), 1);
+}
+
+#[test]
+fn gd_issue_logs_sends_repo_query_parameter() {
+    let server = MockServer::spawn(1, |request| {
+        if request.method() == "GET"
+            && request.path_without_query() == "/api/v5/repos/owner/issues/7/operate_logs"
+            && request.path().contains("repo=repo")
+        {
+            MockResponse {
+                status: 200,
+                body: r#"[{"action":"opened"}]"#,
+            }
+        } else {
+            MockResponse {
+                status: 404,
+                body: r#"{"message":"unexpected request"}"#,
+            }
+        }
+    });
+    let config_dir = tempfile::tempdir().expect("create temporary config dir");
+    let api_base = format!("{}/api/v5", server.base_url());
+
+    let mut command = gd_command();
+    let output = command
+        .env("GITCODE_TOKEN", "integration-token")
+        .env("GD_CONFIG_PATH", config_dir.path().join("config.json"))
+        .arg("--api-base")
+        .arg(&api_base)
+        .args(["issue", "logs", "7", "--repo", "owner/repo", "--json"])
+        .output()
+        .expect("run gd issue logs");
+
+    let requests = server.finish();
+    assert_command_success(&output, &requests);
+    assert_eq!(requests.len(), 1);
+}
+
+#[test]
+fn gd_release_edit_preserves_required_release_fields() {
+    let server = MockServer::spawn(2, |request| {
+        match (request.method(), request.path_without_query()) {
+            ("GET", "/api/v5/repos/owner/repo/releases/42") => MockResponse {
+                status: 200,
+                body: r#"{"tag_name":"v1.0.0","name":"v1.0.0","body":"existing notes","target_commitish":"main","prerelease":false}"#,
+            },
+            ("PATCH", "/api/v5/repos/owner/repo/releases/42") => MockResponse {
+                status: 200,
+                body: r#"{"id":42}"#,
+            },
+            _ => MockResponse {
+                status: 404,
+                body: r#"{"message":"unexpected request"}"#,
+            },
+        }
+    });
+    let config_dir = tempfile::tempdir().expect("create temporary config dir");
+    let api_base = format!("{}/api/v5", server.base_url());
+
+    let mut command = gd_command();
+    let output = command
+        .env("GITCODE_TOKEN", "integration-token")
+        .env("GD_CONFIG_PATH", config_dir.path().join("config.json"))
+        .arg("--api-base")
+        .arg(&api_base)
+        .args([
+            "release",
+            "edit",
+            "42",
+            "--repo",
+            "owner/repo",
+            "--title",
+            "v1.0.0 updated",
+            "--json",
+        ])
+        .output()
+        .expect("run gd release edit");
+
+    let requests = server.finish();
+    assert_command_success(&output, &requests);
+    assert_eq!(requests.len(), 2);
+    let patch = requests
+        .iter()
+        .find(|request| request.method() == "PATCH")
+        .expect("record release edit patch");
+    assert!(patch.body.contains(r#""tag_name":"v1.0.0""#));
+    assert!(patch.body.contains(r#""name":"v1.0.0 updated""#));
+    assert!(patch.body.contains(r#""body":"existing notes""#));
+    assert!(patch.body.contains(r#""target_commitish":"main""#));
+    assert!(patch.body.contains(r#""prerelease":false"#));
+}
+
+#[test]
+fn gd_tag_protected_path_operations_encode_tag_names() {
+    let server = MockServer::spawn(2, |request| {
+        match (request.method(), request.path_without_query()) {
+            ("GET", "/api/v5/repos/owner/repo/protected_tags/release%2F%2A")
+            | ("DELETE", "/api/v5/repos/owner/repo/protected_tags/release%2F%2A") => MockResponse {
+                status: 200,
+                body: r#"{"name":"release/*"}"#,
+            },
+            _ => MockResponse {
+                status: 404,
+                body: r#"{"message":"unexpected request"}"#,
+            },
+        }
+    });
+    let config_dir = tempfile::tempdir().expect("create temporary config dir");
+    let api_base = format!("{}/api/v5", server.base_url());
+    let commands = [
+        vec![
+            "tag",
+            "protected-view",
+            "release/*",
+            "--repo",
+            "owner/repo",
+            "--json",
+        ],
+        vec![
+            "tag",
+            "protected-delete",
+            "release/*",
+            "--repo",
+            "owner/repo",
+            "--json",
+        ],
+    ];
+    let outputs = commands
+        .into_iter()
+        .map(|args| {
+            let mut command = gd_command();
+            command
+                .env("GITCODE_TOKEN", "integration-token")
+                .env("GD_CONFIG_PATH", config_dir.path().join("config.json"))
+                .arg("--api-base")
+                .arg(&api_base)
+                .args(args)
+                .output()
+                .expect("run gd tag protected path command")
+        })
+        .collect::<Vec<_>>();
+
+    let requests = server.finish();
+    for output in &outputs {
+        assert_command_success(output, &requests);
+    }
+    assert_eq!(requests.len(), 2);
+}
+
+#[test]
+fn gd_repo_ref_and_file_paths_are_url_encoded() {
+    let server = MockServer::spawn(6, |request| {
+        match (request.method(), request.path_without_query()) {
+            ("GET", "/api/v5/repos/owner/repo/git/trees/feature%2Fx")
+            | ("GET", "/api/v5/repos/owner/repo/contents/docs/readme%231.md")
+            | ("POST", "/api/v5/repos/owner/repo/contents/docs/a%3Fb.txt")
+            | ("PUT", "/api/v5/repos/owner/repo/contents/docs/percent%25.txt")
+            | ("DELETE", "/api/v5/repos/owner/repo/contents/docs/hash%23gone.txt")
+            | ("GET", "/api/v5/repos/owner/repo/raw/docs/raw%3Ffile.txt") => MockResponse {
+                status: 200,
+                body: r#"{"ok":true}"#,
+            },
+            _ => MockResponse {
+                status: 404,
+                body: r#"{"message":"unexpected request"}"#,
+            },
+        }
+    });
+    let config_dir = tempfile::tempdir().expect("create temporary config dir");
+    let config_path = config_dir.path().join("config.json");
+    let api_base = format!("{}/api/v5", server.base_url());
+    let commands = [
+        vec![
+            "repo",
+            "tree",
+            "feature/x",
+            "--repo",
+            "owner/repo",
+            "--json",
+        ],
+        vec![
+            "repo",
+            "contents",
+            "docs/readme#1.md",
+            "--repo",
+            "owner/repo",
+            "--ref",
+            "main",
+            "--json",
+        ],
+        vec![
+            "repo",
+            "file-create",
+            "docs/a?b.txt",
+            "--repo",
+            "owner/repo",
+            "--message",
+            "create",
+            "--content",
+            "hello",
+            "--json",
+        ],
+        vec![
+            "repo",
+            "file-update",
+            "docs/percent%.txt",
+            "--repo",
+            "owner/repo",
+            "--message",
+            "update",
+            "--sha",
+            "abc123",
+            "--content",
+            "hello",
+            "--json",
+        ],
+        vec![
+            "repo",
+            "file-delete",
+            "docs/hash#gone.txt",
+            "--repo",
+            "owner/repo",
+            "--message",
+            "delete",
+            "--sha",
+            "abc123",
+            "--json",
+        ],
+        vec![
+            "repo",
+            "raw",
+            "docs/raw?file.txt",
+            "--repo",
+            "owner/repo",
+            "--ref",
+            "main",
+            "--json",
+        ],
+    ];
+    let outputs = commands
+        .into_iter()
+        .map(|args| {
+            let mut command = gd_command();
+            command
+                .env("GITCODE_TOKEN", "integration-token")
+                .env("GD_CONFIG_PATH", &config_path)
+                .arg("--api-base")
+                .arg(&api_base)
+                .args(args)
+                .output()
+                .expect("run gd repo encoded path command")
+        })
+        .collect::<Vec<_>>();
+
+    let requests = server.finish();
+    for output in &outputs {
+        assert_command_success(output, &requests);
+    }
+    assert_eq!(requests.len(), 6);
+}
+
+#[test]
+fn gd_repository_label_mutations_use_encoded_paths_and_multipart_forms() {
+    let server = MockServer::spawn(3, |request| {
+        match (request.method(), request.path_without_query()) {
+            ("POST", "/api/v5/repos/owner/repo/labels")
+            | ("PATCH", "/api/v5/repos/owner/repo/labels/team%2Ftriage%3F") => {
+                if request
+                    .header("content-type")
+                    .is_some_and(|value| value.starts_with("multipart/form-data"))
+                    && request.body.contains("name")
+                {
+                    MockResponse {
+                        status: 200,
+                        body: r#"{"name":"team/triage?"}"#,
+                    }
+                } else {
+                    MockResponse {
+                        status: 415,
+                        body: r#"{"message":"expected multipart"}"#,
+                    }
+                }
+            }
+            ("DELETE", "/api/v5/repos/owner/repo/labels/team%2Ftriage%3F") => MockResponse {
+                status: 200,
+                body: r#"{"ok":true}"#,
+            },
+            _ => MockResponse {
+                status: 404,
+                body: r#"{"message":"unexpected request"}"#,
+            },
+        }
+    });
+    let config_dir = tempfile::tempdir().expect("create temporary config dir");
+    let config_path = config_dir.path().join("config.json");
+    let api_base = format!("{}/api/v5", server.base_url());
+    let commands = [
+        vec![
+            "label",
+            "create",
+            "team/triage?",
+            "--repo",
+            "owner/repo",
+            "--color",
+            "ff00aa",
+            "--description",
+            "triage label",
+            "--json",
+        ],
+        vec![
+            "label",
+            "edit",
+            "team/triage?",
+            "--repo",
+            "owner/repo",
+            "--new-name",
+            "team/triage?",
+            "--color",
+            "00ffaa",
+            "--json",
+        ],
+        vec![
+            "label",
+            "delete",
+            "team/triage?",
+            "--repo",
+            "owner/repo",
+            "--json",
+        ],
+    ];
+    let outputs = commands
+        .into_iter()
+        .map(|args| {
+            let mut command = gd_command();
+            command
+                .env("GITCODE_TOKEN", "integration-token")
+                .env("GD_CONFIG_PATH", &config_path)
+                .arg("--api-base")
+                .arg(&api_base)
+                .args(args)
+                .output()
+                .expect("run gd label mutation command")
+        })
+        .collect::<Vec<_>>();
+
+    let requests = server.finish();
+    for output in &outputs {
+        assert_command_success(output, &requests);
+    }
+    assert_eq!(requests.len(), 3);
+}
+
+#[test]
+fn gd_issue_and_pr_label_remove_encode_label_names() {
+    let server = MockServer::spawn(2, |request| {
+        match (request.method(), request.path_without_query()) {
+            ("DELETE", "/api/v5/repos/owner/repo/issues/7/labels/area%2Fapi%23bug")
+            | ("DELETE", "/api/v5/repos/owner/repo/pulls/7/labels/area%2Fapi%23bug") => {
+                MockResponse {
+                    status: 200,
+                    body: r#"{"ok":true}"#,
+                }
+            }
+            _ => MockResponse {
+                status: 404,
+                body: r#"{"message":"unexpected request"}"#,
+            },
+        }
+    });
+    let config_dir = tempfile::tempdir().expect("create temporary config dir");
+    let config_path = config_dir.path().join("config.json");
+    let api_base = format!("{}/api/v5", server.base_url());
+    let commands = [
+        vec![
+            "issue",
+            "label-remove",
+            "7",
+            "area/api#bug",
+            "--repo",
+            "owner/repo",
+            "--json",
+        ],
+        vec![
+            "pr",
+            "label-remove",
+            "7",
+            "area/api#bug",
+            "--repo",
+            "owner/repo",
+            "--json",
+        ],
+    ];
+    let outputs = commands
+        .into_iter()
+        .map(|args| {
+            let mut command = gd_command();
+            command
+                .env("GITCODE_TOKEN", "integration-token")
+                .env("GD_CONFIG_PATH", &config_path)
+                .arg("--api-base")
+                .arg(&api_base)
+                .args(args)
+                .output()
+                .expect("run gd label remove command")
+        })
+        .collect::<Vec<_>>();
+
+    let requests = server.finish();
+    for output in &outputs {
+        assert_command_success(output, &requests);
+    }
+    assert_eq!(requests.len(), 2);
+}
+
+#[test]
 fn gd_repo_move_transfers_repository_with_new_name() {
     let server = MockServer::spawn(2, |request| {
         match (request.method(), request.path_without_query()) {
