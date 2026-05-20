@@ -93,7 +93,15 @@ Create or fork repositories:
 ```bash
 gd repo create demo --private --description "demo repository" --json
 gd repo fork owner/repo --json
+gd repo sync-github coolplayagent/relay-gitcode-cli --org plm-cac --private --json
+gd repo sync-github git@github.com:owner/repo.git --repo target-org/repo --if-exists skip --json
 ```
+
+Use `gd repo sync-github` to create a GitCode repository from a GitHub
+`import_url`. The source accepts `owner/repo`, HTTPS, or SSH GitHub URLs. Omit
+`--org` and `--repo` to import into the authenticated GitCode user namespace,
+pass `--org` for an organization, or pass `--repo owner/name` for an explicit
+target path. Existing targets are skipped by default.
 
 ## Issue and Pull Request Workflows
 
@@ -176,7 +184,18 @@ Inspect and create releases:
 gd release list --repo owner/repo --json
 gd release view v0.1.0 --repo owner/repo --json
 gd release create v0.1.0 --repo owner/repo --title "v0.1.0" --notes "Release notes" --json
+gd release migrate-github --repo owner/repo --github-repo source/repo --tag v0.1.0 --json
+gd release migrate-github --repo owner/repo --github-repo source/repo --all --dry-run --json
+gd release migrate-github --repo owner/repo --github-repo source/repo --tag v0.1.0 --update-release=false --skip-existing-assets=false --json
 ```
+
+`gd release migrate-github` is useful when a GitCode repository mirrors GitHub
+source code but GitHub Release assets must be copied separately. The command
+uses `GITHUB_TOKEN` when present for GitHub reads and GitCode credentials for
+Release creation and asset uploads. Existing GitCode assets with the same name
+are skipped by default. Use `--update-release=false` to preserve existing
+GitCode Release metadata and `--skip-existing-assets=false` to fail on duplicate
+asset names.
 
 ## Raw GitCode API Calls
 

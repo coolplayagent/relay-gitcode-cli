@@ -4,6 +4,7 @@ use anyhow::{Context, bail};
 use reqwest::{
     Method, StatusCode,
     header::{HeaderMap, HeaderName, HeaderValue},
+    multipart,
 };
 use serde::Serialize;
 use serde_json::{Map, Value, json};
@@ -48,6 +49,15 @@ impl GitcodeClient {
         self.request_json("GET", endpoint, query, None).await
     }
 
+    pub async fn get_response(
+        &self,
+        endpoint: &str,
+        query: &[(&str, String)],
+    ) -> anyhow::Result<ApiResponse> {
+        self.request_json_response("GET", endpoint, query, None)
+            .await
+    }
+
     pub async fn post<T: Serialize + ?Sized>(
         &self,
         endpoint: &str,
@@ -77,6 +87,44 @@ impl GitcodeClient {
 
     pub async fn delete(&self, endpoint: &str) -> anyhow::Result<Value> {
         self.request_json("DELETE", endpoint, &[], None).await
+    }
+
+    pub async fn upload_multipart_bytes(
+        &self,
+        upload_url: &str,
+        file_name: &str,
+        content_type: Option<&str>,
+        bytes: Vec<u8>,
+    ) -> anyhow::Result<Value> {
+        let url = Url::parse(upload_url)
+            .with_context(|| format!("invalid release asset upload URL: {upload_url}"))?;
+        let mut part = multipart::Part::bytes(bytes).file_name(file_name.to_string());
+        if let Some(content_type) = content_type {
+            part = part
+                .mime_str(content_type)
+                .with_context(|| format!("invalid asset content type: {content_type}"))?;
+        }
+        let form = multipart::Form::new()
+            .text("name", file_name.to_string())
+            .part("file", part);
+
+        let mut builder = self.http.post(url).multipart(form);
+        builder = self.apply_auth(builder);
+        let response = builder
+            .send()
+            .await
+            .context("GitCode release asset upload failed")?;
+        let status = response.status();
+        let text = response
+            .text()
+            .await
+            .context("failed to read GitCode release asset upload response")?;
+        let body = parse_response_body(&text)?;
+        if status.is_success() {
+            Ok(body)
+        } else {
+            Err(api_status_error(status, &body))
+        }
     }
 
     pub async fn api(&self, request: ApiRequest) -> anyhow::Result<Vec<ApiResponse>> {
@@ -134,6 +182,23 @@ impl GitcodeClient {
         query: &[(&str, String)],
         body: Option<Value>,
     ) -> anyhow::Result<Value> {
+        let response = self
+            .request_json_response(method, endpoint, query, body)
+            .await?;
+        if response.status.is_success() {
+            Ok(response.body)
+        } else {
+            Err(api_status_error(response.status, &response.body))
+        }
+    }
+
+    pub async fn request_json_response(
+        &self,
+        method: &str,
+        endpoint: &str,
+        query: &[(&str, String)],
+        body: Option<Value>,
+    ) -> anyhow::Result<ApiResponse> {
         let method = method.parse::<Method>()?;
         let mut url = self.endpoint_url(endpoint)?;
         {
@@ -152,16 +217,17 @@ impl GitcodeClient {
         }
         let response = builder.send().await.context("GitCode API request failed")?;
         let status = response.status();
+        let response_headers = response.headers().clone();
         let text = response
             .text()
             .await
             .context("failed to read API response")?;
         let body = parse_response_body(&text)?;
-        if status.is_success() {
-            Ok(body)
-        } else {
-            Err(api_status_error(status, &body))
-        }
+        Ok(ApiResponse {
+            status,
+            headers: response_headers,
+            body,
+        })
     }
 
     fn endpoint_url(&self, endpoint: &str) -> anyhow::Result<Url> {

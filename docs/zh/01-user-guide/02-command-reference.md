@@ -25,7 +25,14 @@ gd repo list owner
 gd repo clone owner/repo
 gd repo create name --private --description "demo"
 gd repo fork owner/repo
+gd repo sync-github coolplayagent/relay-gitcode-cli --org plm-cac --private
+gd repo sync-github git@github.com:owner/repo.git --repo target-org/repo --if-exists skip
 ```
+
+`gd repo sync-github` 会通过 GitHub 仓库 `import_url` 在 GitCode 创建并导入
+仓库。不传 `--org` 或 `--repo` 时导入到当前认证的 GitCode 用户命名空间；
+使用 `--org` 可导入组织，使用 `--repo owner/name` 可指定完整目标路径，
+使用 `--name` 可重命名导入项目。
 
 ## Issue 与 Pull Request 命令
 
@@ -110,8 +117,16 @@ gd search users query
 gd ssh-key list
 gd label list --repo owner/repo
 gd release list --repo owner/repo
+gd release migrate-github --repo owner/repo --github-repo source/repo --tag v1.0.0
+gd release migrate-github --repo owner/repo --github-repo source/repo --tag v1.0.0 --update-release=false --skip-existing-assets=false
 gd version check
 ```
+
+`gd release migrate-github` 会读取 GitHub Release 元数据和上传的附件，
+然后在 GitCode 上创建或更新同 tag 的 Release。使用 `--dry-run` 可预览
+迁移内容，使用 `--all` 代替 `--tag` 可补齐历史 Release。GitCode 上已有的
+同名附件默认会跳过。设置 `--update-release=false` 可保留已有 Release 元数据，
+设置 `--skip-existing-assets=false` 可在 GitCode 已有同名附件时直接失败。
 
 codespaces、gists、GitHub Actions workflows、projects、rulesets、extensions、
 Copilot 等 GitHub 专属命令不会进入 `gd`。

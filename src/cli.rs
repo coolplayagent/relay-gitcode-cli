@@ -1,7 +1,7 @@
 use std::{collections::BTreeSet, ffi::OsStr, path::PathBuf};
 
 use clap::{
-    Arg, Args, CommandFactory, Parser, Subcommand, ValueEnum,
+    Arg, ArgAction, Args, CommandFactory, Parser, Subcommand, ValueEnum,
     error::{ContextKind, ContextValue},
 };
 
@@ -528,6 +528,8 @@ pub enum RepoCommand {
     Fork(RepoRefArgs),
     #[command(about = "Create a repository")]
     Create(RepoCreateArgs),
+    #[command(about = "Sync a GitHub repository into GitCode")]
+    SyncGithub(RepoSyncGithubArgs),
 }
 
 #[derive(Debug, Args)]
@@ -562,6 +564,29 @@ pub struct RepoCreateArgs {
     pub private: bool,
     #[arg(long)]
     pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum RepoSyncIfExists {
+    Fail,
+    Skip,
+}
+
+#[derive(Debug, Args)]
+pub struct RepoSyncGithubArgs {
+    pub github_repo: String,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(long)]
+    pub org: Option<String>,
+    #[arg(long)]
+    pub name: Option<String>,
+    #[arg(long)]
+    pub private: bool,
+    #[arg(long)]
+    pub description: Option<String>,
+    #[arg(long, value_enum, default_value_t = RepoSyncIfExists::Skip)]
+    pub if_exists: RepoSyncIfExists,
 }
 
 #[derive(Debug, Subcommand)]
@@ -803,6 +828,8 @@ pub enum ReleaseCommand {
     View(ReleaseViewArgs),
     #[command(about = "Create a repository release")]
     Create(ReleaseCreateArgs),
+    #[command(about = "Migrate GitHub Releases and assets into GitCode")]
+    MigrateGithub(ReleaseMigrateGithubArgs),
 }
 
 #[derive(Debug, Args)]
@@ -831,6 +858,38 @@ pub struct ReleaseCreateArgs {
     pub notes: Option<String>,
     #[arg(long)]
     pub target: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct ReleaseMigrateGithubArgs {
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(long)]
+    pub github_repo: String,
+    #[arg(long, conflicts_with = "all")]
+    pub tag: Option<String>,
+    #[arg(long)]
+    pub all: bool,
+    #[arg(
+        long,
+        action = ArgAction::Set,
+        default_value_t = true,
+        default_missing_value = "true",
+        num_args = 0..=1,
+        require_equals = true
+    )]
+    pub skip_existing_assets: bool,
+    #[arg(
+        long,
+        action = ArgAction::Set,
+        default_value_t = true,
+        default_missing_value = "true",
+        num_args = 0..=1,
+        require_equals = true
+    )]
+    pub update_release: bool,
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -1165,6 +1224,35 @@ mod tests {
     }
 
     #[test]
+    fn parses_repo_sync_github() {
+        let cli = Cli::try_parse_from([
+            "gd",
+            "repo",
+            "sync-github",
+            "git@github.com:source/repo.git",
+            "--org",
+            "target-org",
+            "--name",
+            "target-repo",
+            "--private",
+            "--if-exists",
+            "skip",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Command::Repo(RepoCommand::SyncGithub(args)) => {
+                assert_eq!(args.github_repo, "git@github.com:source/repo.git");
+                assert_eq!(args.org.as_deref(), Some("target-org"));
+                assert_eq!(args.name.as_deref(), Some("target-repo"));
+                assert!(args.private);
+                assert_eq!(args.if_exists, RepoSyncIfExists::Skip);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
     fn parses_format_json_as_json_output() {
         let cli = Cli::try_parse_from(["gd", "--format", "json", "repo", "list", "owner"]).unwrap();
         assert_eq!(cli.global.format, Some(CliOutputFormat::Json));
@@ -1363,6 +1451,64 @@ mod tests {
                 assert_eq!(args.endpoint, "/user");
                 assert_eq!(args.raw_fields, ["a=b"]);
                 assert_eq!(args.fields, ["n=2"]);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_release_migrate_github() {
+        let cli = Cli::try_parse_from([
+            "gd",
+            "release",
+            "migrate-github",
+            "--repo",
+            "owner/repo",
+            "--github-repo",
+            "source/repo",
+            "--tag",
+            "v1.0.0",
+            "--skip-existing-assets",
+            "--update-release",
+            "--dry-run",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Command::Release(ReleaseCommand::MigrateGithub(args)) => {
+                assert_eq!(args.repository.as_deref(), Some("owner/repo"));
+                assert_eq!(args.github_repo, "source/repo");
+                assert_eq!(args.tag.as_deref(), Some("v1.0.0"));
+                assert!(!args.all);
+                assert!(args.skip_existing_assets);
+                assert!(args.update_release);
+                assert!(args.dry_run);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_release_migrate_github_disabled_toggles() {
+        let cli = Cli::try_parse_from([
+            "gd",
+            "release",
+            "migrate-github",
+            "--repo",
+            "owner/repo",
+            "--github-repo",
+            "source/repo",
+            "--tag",
+            "v1.0.0",
+            "--skip-existing-assets=false",
+            "--update-release=false",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Command::Release(ReleaseCommand::MigrateGithub(args)) => {
+                assert!(!args.skip_existing_assets);
+                assert!(!args.update_release);
             }
             other => panic!("unexpected command: {other:?}"),
         }

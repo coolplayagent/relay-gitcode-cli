@@ -9,6 +9,10 @@ This repository ships CI for both GitHub Actions and GitCode Pipeline.
 - Require `Qodana` if `QODANA_TOKEN` is configured.
 - Configure release secrets:
   - `CARGO_REGISTRY_TOKEN` for crates.io publishing.
+  - `GITCODE_TOKEN` for optional GitCode repository and Release
+    synchronization after GitHub Release publication. The token must be able to
+    create the target GitCode repository when missing, create or update
+    Releases, and upload Release assets in the target GitCode repository.
   - `CLAWHUB_TOKEN` for optional ClawHub skill publishing.
     GitHub stores secret names in uppercase, so `clawhub_token` is read as
     `CLAWHUB_TOKEN` by the workflow.

@@ -61,6 +61,7 @@ gd repo list owner
 gd repo clone owner/repo
 gd repo create name --private --description "demo"
 gd repo fork owner/repo
+gd repo sync-github coolplayagent/relay-gitcode-cli --org plm-cac --private
 
 gd issue list --repo owner/repo
 gd issue view 1 --repo owner/repo
@@ -96,6 +97,8 @@ gd search users query
 gd ssh-key list
 gd label list --repo owner/repo
 gd release list --repo owner/repo
+gd release migrate-github --repo owner/repo --github-repo source/repo --tag v1.0.0
+gd release migrate-github --repo owner/repo --github-repo source/repo --tag v1.0.0 --update-release=false --skip-existing-assets=false
 gd version check
 gd completion bash
 ```
