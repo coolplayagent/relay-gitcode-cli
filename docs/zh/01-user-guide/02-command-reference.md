@@ -17,6 +17,12 @@ gd completion bash
 `error`、`matched_path`、`unexpected_token`、`expected`、`suggestion` 和
 `usage`。文本 diagnostic 会尽量包含 `Try:` 与 `Usage:` 行。
 
+当参数语法可在本地确定时，`gd` 会在命令解析阶段校验结构化参数。覆盖范围包括
+`owner/repo` 仓库引用、GitHub 仓库输入、HTTP(S) base URL、
+`.gitcode/workflows/` 下的 workflow 路径、`key=value` API 与 workflow 输入，
+以及 CodeCheck secret 名称。无效参数值会复用未知命令和未知 flag 的文本或 JSON
+diagnostic 输出。
+
 ## 仓库命令
 
 ```bash

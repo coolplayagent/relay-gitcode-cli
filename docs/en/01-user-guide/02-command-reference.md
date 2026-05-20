@@ -19,6 +19,12 @@ JSON diagnostic to stderr with `error`, `matched_path`, `unexpected_token`,
 `expected`, `suggestion`, and `usage` fields. Text diagnostics include best-effort
 `Try:` and `Usage:` lines.
 
+Structured arguments are validated during command parsing where the syntax is
+known locally. This includes `owner/repo` repository references, GitHub
+repository inputs, HTTP(S) base URLs, workflow paths under `.gitcode/workflows/`,
+`key=value` API and workflow inputs, and CodeCheck secret names. Invalid values
+use the same text or JSON diagnostic path as unknown commands and flags.
+
 ## Repository Commands
 
 ```bash
