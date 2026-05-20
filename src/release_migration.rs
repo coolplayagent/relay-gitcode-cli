@@ -95,8 +95,11 @@ struct GithubClient {
 }
 
 impl GithubClient {
-    fn new(http: reqwest::Client, token: Option<String>) -> Self {
-        Self { http, token }
+    fn new(token: Option<String>) -> anyhow::Result<Self> {
+        let http = reqwest::Client::builder()
+            .build()
+            .context("failed to build GitHub HTTP client")?;
+        Ok(Self { http, token })
     }
 
     async fn release_by_tag(&self, repository: &str, tag: &str) -> anyhow::Result<GithubRelease> {
@@ -179,13 +182,12 @@ impl GithubClient {
 }
 
 pub async fn migrate_github_releases(
-    http: reqwest::Client,
     gitcode: &GitcodeClient,
     options: ReleaseMigrationOptions,
 ) -> anyhow::Result<ReleaseMigrationSummary> {
     validate_options(&options)?;
     let github_repo = crate::repo::parse_github_repo(&options.github_repo)?;
-    let github = GithubClient::new(http, options.github_token.clone());
+    let github = GithubClient::new(options.github_token.clone())?;
     let releases = if options.all {
         github.releases(&github_repo).await?
     } else {

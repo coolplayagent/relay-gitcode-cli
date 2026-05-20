@@ -870,9 +870,23 @@ pub struct ReleaseMigrateGithubArgs {
     pub tag: Option<String>,
     #[arg(long)]
     pub all: bool,
-    #[arg(long, action = ArgAction::SetTrue, default_value_t = true)]
+    #[arg(
+        long,
+        action = ArgAction::Set,
+        default_value_t = true,
+        default_missing_value = "true",
+        num_args = 0..=1,
+        require_equals = true
+    )]
     pub skip_existing_assets: bool,
-    #[arg(long, action = ArgAction::SetTrue, default_value_t = true)]
+    #[arg(
+        long,
+        action = ArgAction::Set,
+        default_value_t = true,
+        default_missing_value = "true",
+        num_args = 0..=1,
+        require_equals = true
+    )]
     pub update_release: bool,
     #[arg(long)]
     pub dry_run: bool,
@@ -1469,6 +1483,32 @@ mod tests {
                 assert!(args.skip_existing_assets);
                 assert!(args.update_release);
                 assert!(args.dry_run);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_release_migrate_github_disabled_toggles() {
+        let cli = Cli::try_parse_from([
+            "gd",
+            "release",
+            "migrate-github",
+            "--repo",
+            "owner/repo",
+            "--github-repo",
+            "source/repo",
+            "--tag",
+            "v1.0.0",
+            "--skip-existing-assets=false",
+            "--update-release=false",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Command::Release(ReleaseCommand::MigrateGithub(args)) => {
+                assert!(!args.skip_existing_assets);
+                assert!(!args.update_release);
             }
             other => panic!("unexpected command: {other:?}"),
         }

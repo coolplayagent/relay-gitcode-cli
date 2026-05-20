@@ -95,6 +95,7 @@ gd ssh-key list
 gd label list --repo owner/repo
 gd release list --repo owner/repo
 gd release migrate-github --repo owner/repo --github-repo source/repo --tag v1.0.0
+gd release migrate-github --repo owner/repo --github-repo source/repo --tag v1.0.0 --update-release=false --skip-existing-assets=false
 gd version check
 gd completion bash
 ```

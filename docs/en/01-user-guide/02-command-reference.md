@@ -125,13 +125,17 @@ gd ssh-key list
 gd label list --repo owner/repo
 gd release list --repo owner/repo
 gd release migrate-github --repo owner/repo --github-repo source/repo --tag v1.0.0
+gd release migrate-github --repo owner/repo --github-repo source/repo --tag v1.0.0 --update-release=false --skip-existing-assets=false
 gd version check
 ```
 
 `gd release migrate-github` reads GitHub Release metadata and uploaded assets,
 then creates or updates the matching GitCode Release. Use `--dry-run` to preview
 the migration and `--all` instead of `--tag` to backfill historical releases.
-Existing GitCode assets with the same name are skipped by default.
+Existing GitCode assets with the same name are skipped by default. Set
+`--update-release=false` to leave existing Release metadata unchanged, or
+`--skip-existing-assets=false` to fail when a matching GitCode asset already
+exists.
 
 GitHub-only surfaces such as codespaces, gists, GitHub Actions workflows,
 projects, rulesets, extensions, and Copilot are intentionally excluded.

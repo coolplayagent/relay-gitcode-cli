@@ -186,13 +186,16 @@ gd release view v0.1.0 --repo owner/repo --json
 gd release create v0.1.0 --repo owner/repo --title "v0.1.0" --notes "Release notes" --json
 gd release migrate-github --repo owner/repo --github-repo source/repo --tag v0.1.0 --json
 gd release migrate-github --repo owner/repo --github-repo source/repo --all --dry-run --json
+gd release migrate-github --repo owner/repo --github-repo source/repo --tag v0.1.0 --update-release=false --skip-existing-assets=false --json
 ```
 
 `gd release migrate-github` is useful when a GitCode repository mirrors GitHub
 source code but GitHub Release assets must be copied separately. The command
 uses `GITHUB_TOKEN` when present for GitHub reads and GitCode credentials for
 Release creation and asset uploads. Existing GitCode assets with the same name
-are skipped by default.
+are skipped by default. Use `--update-release=false` to preserve existing
+GitCode Release metadata and `--skip-existing-assets=false` to fail on duplicate
+asset names.
 
 ## Raw GitCode API Calls
 

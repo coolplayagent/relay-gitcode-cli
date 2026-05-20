@@ -101,7 +101,7 @@ pub async fn run(
                     label_command(command, &config, &client, json_output).await
                 }
                 Command::Release(command) => {
-                    release_command(command, &config, &client, http.clone(), json_output).await
+                    release_command(command, &config, &client, json_output).await
                 }
                 Command::Completion(_)
                 | Command::Version(_)
@@ -702,7 +702,6 @@ async fn release_command(
     command: ReleaseCommand,
     config: &Config,
     client: &GitcodeClient,
-    http: reqwest::Client,
     json_output: bool,
 ) -> anyhow::Result<()> {
     match command {
@@ -753,7 +752,6 @@ async fn release_command(
                 repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())
                     .await?;
             let summary = migrate_github_releases(
-                http,
                 client,
                 ReleaseMigrationOptions {
                     gitcode_repo: repository,
