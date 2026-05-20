@@ -3,6 +3,7 @@ mod cli;
 mod client;
 mod commands;
 mod config;
+mod env;
 mod http;
 mod output;
 mod pipeline;
@@ -42,10 +43,13 @@ async fn run() -> anyhow::Result<()> {
         }
     };
     let mut config = Config::load().await.context("failed to load gd config")?;
-    config.apply_overrides(
-        Some(cli.global.hostname.as_str()),
-        Some(cli.global.api_base.as_str()),
-    )?;
+    let api_base = cli
+        .global
+        .api_base
+        .as_deref()
+        .map(str::to_string)
+        .or_else(|| env::gitcode_api_base_env().map(|(_, value)| value));
+    config.apply_overrides(Some(cli.global.hostname.as_str()), api_base.as_deref())?;
 
     let credentials = KeyringCredentialStore::new();
     commands::run(cli, config, &credentials).await

@@ -19,9 +19,10 @@ gd auth status
 gd repo view owner/repo --json
 ```
 
-`GITCODE_TOKEN` is also accepted directly for CI and temporary end-to-end tests.
-When no environment token is present, `gd auth login --with-token` stores the
-token in the system keyring.
+`GD_TOKEN` and `GITCODE_TOKEN` are also accepted directly for CI and temporary
+end-to-end tests, with `GD_TOKEN` taking precedence. When no environment token
+is present, `gd auth login --with-token` stores the token in the system
+keyring.
 
 OpenLibing-backed pipeline gate checks use separate credentials. Use
 `gd pipeline auth login` for browser OAuth, or set `GD_OPENLIBING_TOKEN` or
@@ -125,7 +126,10 @@ part of `gd` unless GitCode exposes equivalent API behavior.
 `gd` honors reqwest system proxy environment variables:
 `HTTP_PROXY`/`http_proxy`, `HTTPS_PROXY`/`https_proxy`,
 `ALL_PROXY`/`all_proxy`, and `NO_PROXY`/`no_proxy`. TLS certificate
-verification is disabled by default for GitCode API calls.
+verification is disabled by default for GitCode API calls. Set
+`GD_SSL_VERIFY`, `GITCODE_SSL_VERIFY`, or `SSL_VERIFY` to `true` to enable
+certificate verification, or set `GIT_SSL_NO_VERIFY` to any non-empty value to
+keep it disabled.
 
 ## Documentation
 

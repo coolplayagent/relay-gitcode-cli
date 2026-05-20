@@ -33,7 +33,8 @@ gd auth status
 ```
 
 `gd` stores login tokens in the system keyring. In CI and temporary end-to-end
-tests, `GITCODE_TOKEN` takes precedence and avoids writing credentials to disk.
+tests, `GD_TOKEN` and `GITCODE_TOKEN` avoid writing credentials to disk.
+`GD_TOKEN` takes precedence when both are present.
 
 ## API Host
 
@@ -43,8 +44,9 @@ The default API base is:
 https://api.gitcode.com/api/v5
 ```
 
-Override it with `--api-base` or `GITCODE_API_BASE` when testing compatible
-hosts.
+Override it with `--api-base`, `GD_API_BASE`, or `GITCODE_API_BASE` when
+testing compatible hosts. The precedence is CLI flag, `GD_API_BASE`, then
+`GITCODE_API_BASE`.
 
 ## Network
 
@@ -53,3 +55,6 @@ hosts.
 `ALL_PROXY`/`all_proxy`, and `NO_PROXY`/`no_proxy`.
 
 TLS certificate verification is disabled by default for GitCode API calls.
+Set `GD_SSL_VERIFY`, `GITCODE_SSL_VERIFY`, or `SSL_VERIFY` to `true` to enable
+certificate verification. Any non-empty `GIT_SSL_NO_VERIFY` value keeps
+verification disabled.

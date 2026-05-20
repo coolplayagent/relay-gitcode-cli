@@ -3,6 +3,8 @@ use std::sync::OnceLock;
 use anyhow::Context;
 use keyring_core::{Entry, Error as KeyringError};
 
+use crate::env;
+
 const SERVICE_PREFIX: &str = "gd.gitcode";
 
 pub trait CredentialStore {
@@ -38,9 +40,7 @@ impl KeyringCredentialStore {
 
 impl CredentialStore for KeyringCredentialStore {
     fn get_token(&self, hostname: &str) -> anyhow::Result<Option<String>> {
-        if let Ok(token) = std::env::var("GITCODE_TOKEN")
-            && !token.trim().is_empty()
-        {
+        if let Some((_, token)) = env::gitcode_token_env() {
             return Ok(Some(token));
         }
 

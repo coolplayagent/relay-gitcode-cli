@@ -148,6 +148,124 @@ fn gd_api_uses_bearer_token_from_gitcode_token() {
 }
 
 #[test]
+fn gd_api_prefers_gd_token_over_gitcode_token() {
+    let server = MockServer::spawn(1, |request| {
+        if request.method() == "GET" && request.path_without_query() == "/api/v5/user" {
+            MockResponse {
+                status: 200,
+                body: r#"{"login":"mock-user"}"#,
+            }
+        } else {
+            MockResponse {
+                status: 404,
+                body: r#"{"message":"unexpected request"}"#,
+            }
+        }
+    });
+    let config_dir = tempfile::tempdir().expect("create temporary config dir");
+    let api_base = format!("{}/api/v5", server.base_url());
+
+    let mut command = gd_command();
+    let output = command
+        .env("GD_TOKEN", "gd-token")
+        .env("GITCODE_TOKEN", "gitcode-token")
+        .env("GD_CONFIG_PATH", config_dir.path().join("config.json"))
+        .arg("--api-base")
+        .arg(api_base)
+        .args(["api", "/user", "--json"])
+        .output()
+        .expect("run gd api");
+
+    let requests = server.finish();
+    assert_command_success(&output, &requests);
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].header("authorization"), Some("Bearer gd-token"));
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("gd-token"));
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("gitcode-token"));
+}
+
+#[test]
+fn gd_api_prefers_gd_api_base_over_gitcode_api_base() {
+    let gitcode_base_server = MockServer::spawn(0, |_| MockResponse {
+        status: 500,
+        body: r#"{"message":"GITCODE_API_BASE should not be used"}"#,
+    });
+    let gd_base_server = MockServer::spawn(1, |request| {
+        if request.method() == "GET" && request.path_without_query() == "/api/v5/user" {
+            MockResponse {
+                status: 200,
+                body: r#"{"login":"gd-base-user"}"#,
+            }
+        } else {
+            MockResponse {
+                status: 404,
+                body: r#"{"message":"unexpected request"}"#,
+            }
+        }
+    });
+    let config_dir = tempfile::tempdir().expect("create temporary config dir");
+    let gitcode_api_base = format!("{}/api/v5", gitcode_base_server.base_url());
+    let gd_api_base = format!("{}/api/v5", gd_base_server.base_url());
+
+    let mut command = gd_command();
+    let output = command
+        .env("GD_TOKEN", "integration-token")
+        .env("GITCODE_API_BASE", gitcode_api_base)
+        .env("GD_API_BASE", gd_api_base)
+        .env("GD_CONFIG_PATH", config_dir.path().join("config.json"))
+        .args(["api", "/user", "--json"])
+        .output()
+        .expect("run gd api with API base from environment");
+
+    let gd_base_requests = gd_base_server.finish();
+    let gitcode_base_requests = gitcode_base_server.finish();
+    assert_command_success(&output, &gd_base_requests);
+    assert_eq!(gd_base_requests.len(), 1);
+    assert!(gitcode_base_requests.is_empty());
+}
+
+#[test]
+fn gd_api_prefers_cli_api_base_over_environment_api_base() {
+    let env_base_server = MockServer::spawn(0, |_| MockResponse {
+        status: 500,
+        body: r#"{"message":"GD_API_BASE should not be used"}"#,
+    });
+    let cli_base_server = MockServer::spawn(1, |request| {
+        if request.method() == "GET" && request.path_without_query() == "/api/v5/user" {
+            MockResponse {
+                status: 200,
+                body: r#"{"login":"cli-base-user"}"#,
+            }
+        } else {
+            MockResponse {
+                status: 404,
+                body: r#"{"message":"unexpected request"}"#,
+            }
+        }
+    });
+    let config_dir = tempfile::tempdir().expect("create temporary config dir");
+    let env_api_base = format!("{}/api/v5", env_base_server.base_url());
+    let cli_api_base = format!("{}/api/v5", cli_base_server.base_url());
+
+    let mut command = gd_command();
+    let output = command
+        .env("GD_TOKEN", "integration-token")
+        .env("GD_API_BASE", env_api_base)
+        .env("GD_CONFIG_PATH", config_dir.path().join("config.json"))
+        .arg("--api-base")
+        .arg(cli_api_base)
+        .args(["api", "/user", "--json"])
+        .output()
+        .expect("run gd api with API base from CLI");
+
+    let cli_base_requests = cli_base_server.finish();
+    let env_base_requests = env_base_server.finish();
+    assert_command_success(&output, &cli_base_requests);
+    assert_eq!(cli_base_requests.len(), 1);
+    assert!(env_base_requests.is_empty());
+}
+
+#[test]
 fn gd_pipeline_list_reuses_gitcode_bearer_token() {
     let server = MockServer::spawn(2, |request| {
         match (request.method(), request.path_without_query()) {
@@ -1053,6 +1171,14 @@ fn gd_api_respects_no_proxy_environment() {
 fn gd_command() -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_gd"));
     for key in [
+        "GD_TOKEN",
+        "GITCODE_TOKEN",
+        "GD_API_BASE",
+        "GITCODE_API_BASE",
+        "GD_SSL_VERIFY",
+        "GITCODE_SSL_VERIFY",
+        "SSL_VERIFY",
+        "GIT_SSL_NO_VERIFY",
         "HTTP_PROXY",
         "http_proxy",
         "HTTPS_PROXY",

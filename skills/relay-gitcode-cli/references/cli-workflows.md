@@ -44,10 +44,11 @@ Do not install from a local repository checkout as part of this skill workflow.
 The bundled binaries and online fallbacks should come from released CLI
 artifacts.
 
-Use `GITCODE_TOKEN` for temporary automation and CI:
+Use `GD_TOKEN` or `GITCODE_TOKEN` for temporary automation and CI. `GD_TOKEN`
+takes precedence when both are present:
 
 ```bash
-GITCODE_TOKEN="$GITCODE_TOKEN" gd auth status --json
+GD_TOKEN="$GD_TOKEN" gd auth status --json
 ```
 
 Use keyring-backed login for interactive local sessions:
@@ -266,7 +267,7 @@ gd pipeline rerun --repo owner/repo workflow-run-id --json
 the full response envelope.
 
 OpenLibing provides GitCode PR gate and CodeCheck status. Authenticate
-separately from `GITCODE_TOKEN`:
+separately from `GD_TOKEN` and `GITCODE_TOKEN`:
 
 ```bash
 gd pipeline auth login

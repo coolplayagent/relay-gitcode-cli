@@ -28,5 +28,6 @@ This repository ships CI for both GitHub Actions and GitCode Pipeline.
 ## Local Policy
 
 - Do not commit GitCode personal access tokens.
-- For local end-to-end testing, prefer `GITCODE_TOKEN` in the process environment.
+- For local end-to-end testing, prefer `GD_TOKEN` or `GITCODE_TOKEN` in the
+  process environment.
 - `gd auth login --with-token` stores credentials in the system keyring.
