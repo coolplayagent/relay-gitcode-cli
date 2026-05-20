@@ -43,8 +43,9 @@ OpenLibing 仍会在服务端校验仓库维护权限。仓库新增或更新返
 共享 reqwest 客户端保持 reqwest 系统代理行为，支持
 `HTTP_PROXY`/`http_proxy`、`HTTPS_PROXY`/`https_proxy`、
 `ALL_PROXY`/`all_proxy` 和 `NO_PROXY`/`no_proxy`。GitCode API 调用默认不校验
-TLS 证书。`GD_SSL_VERIFY`、`GITCODE_SSL_VERIFY` 和 `SSL_VERIFY` 可启用或
-禁用证书校验，任意非空 `GIT_SSL_NO_VERIFY` 值会作为 Git 风格的禁用开关受支持。
+TLS 证书。`GD_SSL_VERIFY`/`gd_ssl_verify`、
+`GITCODE_SSL_VERIFY`/`gitcode_ssl_verify` 和 `SSL_VERIFY`/`ssl_verify` 可启用或
+禁用证书校验，任意非空 `GIT_SSL_NO_VERIFY`/`git_ssl_no_verify` 值会作为 Git 风格的禁用开关受支持。
 
 ## 命令边界
 

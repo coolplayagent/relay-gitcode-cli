@@ -33,9 +33,10 @@ aligned with the compiled CLI.
 `gd` reuses reqwest system proxy behavior for `HTTP_PROXY`/`http_proxy`,
 `HTTPS_PROXY`/`https_proxy`, `ALL_PROXY`/`all_proxy`, and
 `NO_PROXY`/`no_proxy`. TLS certificate verification is disabled by default for
-GitCode API calls. Set `GD_SSL_VERIFY`, `GITCODE_SSL_VERIFY`, or `SSL_VERIFY`
-to `true` to enable verification; any non-empty `GIT_SSL_NO_VERIFY` value keeps
-it disabled.
+GitCode API calls. Set `GD_SSL_VERIFY`/`gd_ssl_verify`,
+`GITCODE_SSL_VERIFY`/`gitcode_ssl_verify`, or `SSL_VERIFY`/`ssl_verify` to
+`true` to enable verification; any non-empty
+`GIT_SSL_NO_VERIFY`/`git_ssl_no_verify` value keeps it disabled.
 
 ## Readiness
 

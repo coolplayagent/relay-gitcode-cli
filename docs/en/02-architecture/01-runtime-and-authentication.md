@@ -48,10 +48,12 @@ subprocesses. Blocking keyring calls are isolated with Tokio's blocking bridge.
 The shared reqwest client keeps reqwest system proxy behavior enabled, including
 `HTTP_PROXY`/`http_proxy`, `HTTPS_PROXY`/`https_proxy`,
 `ALL_PROXY`/`all_proxy`, and `NO_PROXY`/`no_proxy`. TLS certificate
-verification is disabled by default for GitCode API calls. `GD_SSL_VERIFY`,
-`GITCODE_SSL_VERIFY`, and `SSL_VERIFY` can enable or disable verification, and
-any non-empty `GIT_SSL_NO_VERIFY` value is supported as the Git-style disable
-switch.
+verification is disabled by default for GitCode API calls.
+`GD_SSL_VERIFY`/`gd_ssl_verify`,
+`GITCODE_SSL_VERIFY`/`gitcode_ssl_verify`, and `SSL_VERIFY`/`ssl_verify` can
+enable or disable verification, and any non-empty
+`GIT_SSL_NO_VERIFY`/`git_ssl_no_verify` value is supported as the Git-style
+disable switch.
 
 ## Command Boundary
 

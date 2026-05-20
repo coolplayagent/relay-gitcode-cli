@@ -127,9 +127,10 @@ part of `gd` unless GitCode exposes equivalent API behavior.
 `HTTP_PROXY`/`http_proxy`, `HTTPS_PROXY`/`https_proxy`,
 `ALL_PROXY`/`all_proxy`, and `NO_PROXY`/`no_proxy`. TLS certificate
 verification is disabled by default for GitCode API calls. Set
-`GD_SSL_VERIFY`, `GITCODE_SSL_VERIFY`, or `SSL_VERIFY` to `true` to enable
-certificate verification, or set `GIT_SSL_NO_VERIFY` to any non-empty value to
-keep it disabled.
+`GD_SSL_VERIFY`/`gd_ssl_verify`, `GITCODE_SSL_VERIFY`/`gitcode_ssl_verify`, or
+`SSL_VERIFY`/`ssl_verify` to `true` to enable certificate verification, or set
+`GIT_SSL_NO_VERIFY`/`git_ssl_no_verify` to any non-empty value to keep it
+disabled.
 
 ## Documentation
 
