@@ -51,7 +51,8 @@ impl ParseDiagnostic {
         let matched_path = matched_path(&root, tokens);
         let command = command_for_path(&root, &matched_path);
         let usage = usage_from_error(error).or_else(|| command.map(command_usage));
-        let unexpected_token = unexpected_token(error);
+        let unexpected_token =
+            invalid_value_from_message(error).or_else(|| unexpected_token(error));
         let suggestion = suggestion_for(error, command, &matched_path, usage.as_deref());
         let expected = expected_terms(&root, command.unwrap_or(&root));
 
@@ -232,6 +233,13 @@ fn unexpected_token(error: &clap::Error) -> Option<String> {
     None
 }
 
+fn invalid_value_from_message(error: &clap::Error) -> Option<String> {
+    let message = clean_error_message(error);
+    let rest = message.strip_prefix("invalid value '")?;
+    let (value, _) = rest.split_once("'")?;
+    Some(value.to_string())
+}
+
 fn suggestion_for(
     error: &clap::Error,
     command: Option<&clap::Command>,
@@ -373,6 +381,58 @@ fn edit_distance(left: &str, right: &str) -> usize {
     previous[right_len]
 }
 
+fn parse_gitcode_repository_arg(value: &str) -> Result<String, String> {
+    crate::repo::split_repo(value)
+        .map(|_| value.to_string())
+        .map_err(|error| error.to_string())
+}
+
+fn parse_github_repository_arg(value: &str) -> Result<String, String> {
+    crate::repo::parse_github_repo(value)
+        .map(|_| value.to_string())
+        .map_err(|error| error.to_string())
+}
+
+fn parse_api_base_arg(value: &str) -> Result<String, String> {
+    crate::config::parse_api_base(value)
+        .map(|_| value.to_string())
+        .map_err(|error| error.to_string())
+}
+
+fn parse_openlibing_base_arg(value: &str) -> Result<String, String> {
+    crate::pipeline::openlibing_base_from_value(value)
+        .map(|_| value.to_string())
+        .map_err(|error| error.to_string())
+}
+
+fn parse_api_field_arg(value: &str) -> Result<String, String> {
+    crate::client::split_field(value)
+        .map(|_| value.to_string())
+        .map_err(|error| error.to_string())
+}
+
+fn parse_workflow_path_arg(value: &str) -> Result<String, String> {
+    crate::pipeline::validate_workflow_path(value)
+        .map(|_| value.to_string())
+        .map_err(|error| error.to_string())
+}
+
+fn parse_workflow_input_arg(value: &str) -> Result<String, String> {
+    let Some((key, _)) = value.split_once('=') else {
+        return Err(format!("workflow input must be in key=value form: {value}"));
+    };
+    if key.trim().is_empty() {
+        return Err("workflow input key cannot be empty".to_string());
+    }
+    Ok(value.to_string())
+}
+
+fn parse_codecheck_secret_arg(value: &str) -> Result<String, String> {
+    crate::pipeline::validate_codecheck_secret_name(value)
+        .map(|_| value.to_string())
+        .map_err(|error| error.to_string())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum CliOutputFormat {
     Text,
@@ -383,13 +443,20 @@ pub enum CliOutputFormat {
 pub struct GlobalArgs {
     #[arg(long, global = true, default_value = "gitcode.com")]
     pub hostname: String,
-    #[arg(long, global = true, value_name = "URL", help = "GitCode API base URL")]
+    #[arg(
+        long,
+        global = true,
+        value_name = "URL",
+        value_parser = parse_api_base_arg,
+        help = "GitCode API base URL"
+    )]
     pub api_base: Option<String>,
     #[arg(
         long,
         global = true,
         env = "GD_OPENLIBING_BASE",
         default_value = "https://www.openlibing.com/gateway",
+        value_parser = parse_openlibing_base_arg,
         help = "OpenLibing gateway base URL for pipeline gate checks"
     )]
     pub openlibing_base: String,
@@ -497,9 +564,9 @@ pub struct ApiArgs {
     pub method: String,
     #[arg(short = 'H', long = "header")]
     pub headers: Vec<String>,
-    #[arg(short = 'f', long = "raw-field")]
+    #[arg(short = 'f', long = "raw-field", value_parser = parse_api_field_arg)]
     pub raw_fields: Vec<String>,
-    #[arg(short = 'F', long = "field")]
+    #[arg(short = 'F', long = "field", value_parser = parse_api_field_arg)]
     pub fields: Vec<String>,
     #[arg(long)]
     pub input: Option<PathBuf>,
@@ -531,6 +598,7 @@ pub enum RepoCommand {
 
 #[derive(Debug, Args)]
 pub struct RepoViewArgs {
+    #[arg(value_parser = parse_gitcode_repository_arg)]
     pub repository: Option<String>,
 }
 
@@ -543,6 +611,7 @@ pub struct RepoListArgs {
 
 #[derive(Debug, Args)]
 pub struct RepoCloneArgs {
+    #[arg(value_parser = parse_gitcode_repository_arg)]
     pub repository: String,
     pub directory: Option<PathBuf>,
     #[arg(last = true)]
@@ -551,6 +620,7 @@ pub struct RepoCloneArgs {
 
 #[derive(Debug, Args)]
 pub struct RepoRefArgs {
+    #[arg(value_parser = parse_gitcode_repository_arg)]
     pub repository: String,
 }
 
@@ -565,6 +635,7 @@ pub struct RepoCreateArgs {
 
 #[derive(Debug, Args)]
 pub struct RepoMoveArgs {
+    #[arg(value_parser = parse_gitcode_repository_arg)]
     pub source: String,
     pub target: String,
     #[arg(long)]
@@ -587,8 +658,9 @@ pub enum RepoSyncMethod {
 
 #[derive(Debug, Args)]
 pub struct RepoSyncGithubArgs {
+    #[arg(value_parser = parse_github_repository_arg)]
     pub github_repo: String,
-    #[arg(short = 'R', long = "repo")]
+    #[arg(short = 'R', long = "repo", value_parser = parse_gitcode_repository_arg)]
     pub repository: Option<String>,
     #[arg(long)]
     pub org: Option<String>,
@@ -618,7 +690,7 @@ pub enum IssueCommand {
 
 #[derive(Debug, Args)]
 pub struct IssueListArgs {
-    #[arg(short = 'R', long = "repo")]
+    #[arg(short = 'R', long = "repo", value_parser = parse_gitcode_repository_arg)]
     pub repository: Option<String>,
     #[arg(short = 's', long, default_value = "open")]
     pub state: String,
@@ -629,13 +701,13 @@ pub struct IssueListArgs {
 #[derive(Debug, Args)]
 pub struct IssueViewArgs {
     pub number: u64,
-    #[arg(short = 'R', long = "repo")]
+    #[arg(short = 'R', long = "repo", value_parser = parse_gitcode_repository_arg)]
     pub repository: Option<String>,
 }
 
 #[derive(Debug, Args)]
 pub struct IssueCreateArgs {
-    #[arg(short = 'R', long = "repo")]
+    #[arg(short = 'R', long = "repo", value_parser = parse_gitcode_repository_arg)]
     pub repository: Option<String>,
     #[arg(short = 't', long)]
     pub title: String,
@@ -650,7 +722,7 @@ pub struct IssueCreateArgs {
 #[derive(Debug, Args)]
 pub struct IssueCommentArgs {
     pub number: u64,
-    #[arg(short = 'R', long = "repo")]
+    #[arg(short = 'R', long = "repo", value_parser = parse_gitcode_repository_arg)]
     pub repository: Option<String>,
     #[arg(short = 'b', long)]
     pub body: String,
@@ -674,7 +746,7 @@ pub enum PrCommand {
 
 #[derive(Debug, Args)]
 pub struct PrListArgs {
-    #[arg(short = 'R', long = "repo")]
+    #[arg(short = 'R', long = "repo", value_parser = parse_gitcode_repository_arg)]
     pub repository: Option<String>,
     #[arg(short = 's', long, default_value = "open")]
     pub state: String,
@@ -687,13 +759,13 @@ pub struct PrListArgs {
 #[derive(Debug, Args)]
 pub struct PrViewArgs {
     pub number: u64,
-    #[arg(short = 'R', long = "repo")]
+    #[arg(short = 'R', long = "repo", value_parser = parse_gitcode_repository_arg)]
     pub repository: Option<String>,
 }
 
 #[derive(Debug, Args)]
 pub struct PrCreateArgs {
-    #[arg(short = 'R', long = "repo")]
+    #[arg(short = 'R', long = "repo", value_parser = parse_gitcode_repository_arg)]
     pub repository: Option<String>,
     #[arg(short = 't', long)]
     pub title: String,
@@ -712,7 +784,7 @@ pub struct PrCreateArgs {
 #[derive(Debug, Args)]
 pub struct PrCommentsArgs {
     pub number: u64,
-    #[arg(short = 'R', long = "repo")]
+    #[arg(short = 'R', long = "repo", value_parser = parse_gitcode_repository_arg)]
     pub repository: Option<String>,
     #[arg(long, default_value_t = 1)]
     pub page: u64,
@@ -723,7 +795,7 @@ pub struct PrCommentsArgs {
 #[derive(Debug, Args)]
 pub struct PrCommentArgs {
     pub number: u64,
-    #[arg(short = 'R', long = "repo")]
+    #[arg(short = 'R', long = "repo", value_parser = parse_gitcode_repository_arg)]
     pub repository: Option<String>,
     #[arg(short = 'b', long)]
     pub body: String,
@@ -739,7 +811,7 @@ pub struct PrCommentArgs {
 pub struct PrReplyArgs {
     pub number: u64,
     pub discussion_id: String,
-    #[arg(short = 'R', long = "repo")]
+    #[arg(short = 'R', long = "repo", value_parser = parse_gitcode_repository_arg)]
     pub repository: Option<String>,
     #[arg(short = 'b', long)]
     pub body: String,
@@ -798,7 +870,7 @@ pub enum LabelCommand {
 
 #[derive(Debug, Args)]
 pub struct LabelListArgs {
-    #[arg(short = 'R', long = "repo")]
+    #[arg(short = 'R', long = "repo", value_parser = parse_gitcode_repository_arg)]
     pub repository: Option<String>,
     #[arg(short = 'L', long, default_value_t = 100)]
     pub limit: u32,
@@ -807,7 +879,7 @@ pub struct LabelListArgs {
 #[derive(Debug, Args)]
 pub struct LabelCreateArgs {
     pub name: String,
-    #[arg(short = 'R', long = "repo")]
+    #[arg(short = 'R', long = "repo", value_parser = parse_gitcode_repository_arg)]
     pub repository: Option<String>,
     #[arg(short = 'c', long)]
     pub color: Option<String>,
@@ -818,7 +890,7 @@ pub struct LabelCreateArgs {
 #[derive(Debug, Args)]
 pub struct LabelEditArgs {
     pub name: String,
-    #[arg(short = 'R', long = "repo")]
+    #[arg(short = 'R', long = "repo", value_parser = parse_gitcode_repository_arg)]
     pub repository: Option<String>,
     #[arg(long)]
     pub new_name: Option<String>,
@@ -831,7 +903,7 @@ pub struct LabelEditArgs {
 #[derive(Debug, Args)]
 pub struct LabelDeleteArgs {
     pub name: String,
-    #[arg(short = 'R', long = "repo")]
+    #[arg(short = 'R', long = "repo", value_parser = parse_gitcode_repository_arg)]
     pub repository: Option<String>,
 }
 
@@ -849,7 +921,7 @@ pub enum ReleaseCommand {
 
 #[derive(Debug, Args)]
 pub struct ReleaseListArgs {
-    #[arg(short = 'R', long = "repo")]
+    #[arg(short = 'R', long = "repo", value_parser = parse_gitcode_repository_arg)]
     pub repository: Option<String>,
     #[arg(short = 'L', long, default_value_t = 30)]
     pub limit: u32,
@@ -858,14 +930,14 @@ pub struct ReleaseListArgs {
 #[derive(Debug, Args)]
 pub struct ReleaseViewArgs {
     pub tag: String,
-    #[arg(short = 'R', long = "repo")]
+    #[arg(short = 'R', long = "repo", value_parser = parse_gitcode_repository_arg)]
     pub repository: Option<String>,
 }
 
 #[derive(Debug, Args)]
 pub struct ReleaseCreateArgs {
     pub tag: String,
-    #[arg(short = 'R', long = "repo")]
+    #[arg(short = 'R', long = "repo", value_parser = parse_gitcode_repository_arg)]
     pub repository: Option<String>,
     #[arg(short = 't', long)]
     pub title: Option<String>,
@@ -877,9 +949,9 @@ pub struct ReleaseCreateArgs {
 
 #[derive(Debug, Args)]
 pub struct ReleaseMigrateGithubArgs {
-    #[arg(short = 'R', long = "repo")]
+    #[arg(short = 'R', long = "repo", value_parser = parse_gitcode_repository_arg)]
     pub repository: Option<String>,
-    #[arg(long)]
+    #[arg(long, value_parser = parse_github_repository_arg)]
     pub github_repo: String,
     #[arg(long, conflicts_with = "all")]
     pub tag: Option<String>,
@@ -954,8 +1026,9 @@ pub enum PipelineCommand {
 
 #[derive(Debug, Args)]
 pub struct PipelineSetArgs {
-    #[arg(short = 'R', long = "repo")]
+    #[arg(short = 'R', long = "repo", value_parser = parse_gitcode_repository_arg)]
     pub repository: Option<String>,
+    #[arg(value_parser = parse_workflow_path_arg)]
     pub path: String,
     #[arg(long, value_enum, default_value_t = PipelineSetMode::Create)]
     pub mode: PipelineSetMode,
@@ -973,9 +1046,13 @@ pub struct PipelineSetArgs {
 
 #[derive(Debug, Args)]
 pub struct PipelineCodecheckArgs {
-    #[arg(short = 'R', long = "repo")]
+    #[arg(short = 'R', long = "repo", value_parser = parse_gitcode_repository_arg)]
     pub repository: Option<String>,
-    #[arg(long, default_value = ".gitcode/workflows/codecheck.yml")]
+    #[arg(
+        long,
+        default_value = ".gitcode/workflows/codecheck.yml",
+        value_parser = parse_workflow_path_arg
+    )]
     pub path: String,
     #[arg(long, value_enum, default_value_t = PipelineSetMode::Create)]
     pub mode: PipelineSetMode,
@@ -997,7 +1074,11 @@ pub struct PipelineCodecheckArgs {
     pub repo_url: Option<String>,
     #[arg(long = "language")]
     pub languages: Vec<String>,
-    #[arg(long = "access-token-secret", default_value = "CODECHECK_ACCESS_TOKEN")]
+    #[arg(
+        long = "access-token-secret",
+        default_value = "CODECHECK_ACCESS_TOKEN",
+        value_parser = parse_codecheck_secret_arg
+    )]
     pub access_token_secret: String,
 }
 
@@ -1009,7 +1090,7 @@ pub enum PipelineSetMode {
 
 #[derive(Debug, Args)]
 pub struct PipelineListArgs {
-    #[arg(short = 'R', long = "repo")]
+    #[arg(short = 'R', long = "repo", value_parser = parse_gitcode_repository_arg)]
     pub repository: Option<String>,
     #[arg(long, default_value_t = 1)]
     pub page: u64,
@@ -1019,22 +1100,22 @@ pub struct PipelineListArgs {
 
 #[derive(Debug, Args)]
 pub struct PipelineRunArgs {
-    #[arg(short = 'R', long = "repo")]
+    #[arg(short = 'R', long = "repo", value_parser = parse_gitcode_repository_arg)]
     pub repository: Option<String>,
     pub workflow_id: String,
-    #[arg(long)]
+    #[arg(long, value_parser = parse_workflow_path_arg)]
     pub file_path: String,
     #[arg(long)]
     pub branch: Option<String>,
     #[arg(long)]
     pub branch_commit_id: Option<String>,
-    #[arg(long = "input")]
+    #[arg(long = "input", value_parser = parse_workflow_input_arg)]
     pub inputs: Vec<String>,
 }
 
 #[derive(Debug, Args)]
 pub struct PipelineRunsArgs {
-    #[arg(short = 'R', long = "repo")]
+    #[arg(short = 'R', long = "repo", value_parser = parse_gitcode_repository_arg)]
     pub repository: Option<String>,
     #[arg(long)]
     pub workflow_id: Option<String>,
@@ -1058,14 +1139,14 @@ pub struct PipelineRunsArgs {
 
 #[derive(Debug, Args)]
 pub struct PipelineViewArgs {
-    #[arg(short = 'R', long = "repo")]
+    #[arg(short = 'R', long = "repo", value_parser = parse_gitcode_repository_arg)]
     pub repository: Option<String>,
     pub workflow_run_id: String,
 }
 
 #[derive(Debug, Args)]
 pub struct PipelineLogArgs {
-    #[arg(short = 'R', long = "repo")]
+    #[arg(short = 'R', long = "repo", value_parser = parse_gitcode_repository_arg)]
     pub repository: Option<String>,
     pub workflow_run_id: String,
     pub job_identifier: String,
@@ -1079,14 +1160,14 @@ pub struct PipelineLogArgs {
 
 #[derive(Debug, Args)]
 pub struct PipelineStopArgs {
-    #[arg(short = 'R', long = "repo")]
+    #[arg(short = 'R', long = "repo", value_parser = parse_gitcode_repository_arg)]
     pub repository: Option<String>,
     pub workflow_run_id: String,
 }
 
 #[derive(Debug, Args)]
 pub struct PipelineRetryArgs {
-    #[arg(short = 'R', long = "repo")]
+    #[arg(short = 'R', long = "repo", value_parser = parse_gitcode_repository_arg)]
     pub repository: Option<String>,
     pub workflow_run_id: String,
     #[arg(long = "job-run-id")]
@@ -1095,7 +1176,7 @@ pub struct PipelineRetryArgs {
 
 #[derive(Debug, Args)]
 pub struct PipelineRerunArgs {
-    #[arg(short = 'R', long = "repo")]
+    #[arg(short = 'R', long = "repo", value_parser = parse_gitcode_repository_arg)]
     pub repository: Option<String>,
     pub workflow_run_id: String,
 }
@@ -1132,7 +1213,12 @@ pub struct PipelineConfigArgs {
 pub struct PipelineSetupArgs {
     #[arg(long)]
     pub project_id: String,
-    #[arg(short = 'R', long = "repo", required_unless_present = "repo_url")]
+    #[arg(
+        short = 'R',
+        long = "repo",
+        required_unless_present = "repo_url",
+        value_parser = parse_gitcode_repository_arg
+    )]
     pub repository: Option<String>,
     #[arg(long, required_unless_present = "repository")]
     pub repo_url: Option<String>,
@@ -1175,7 +1261,7 @@ pub struct PipelineSetupArgs {
 pub struct PipelinePrsArgs {
     #[arg(long)]
     pub project_id: String,
-    #[arg(short = 'R', long = "repo")]
+    #[arg(short = 'R', long = "repo", value_parser = parse_gitcode_repository_arg)]
     pub repository: Option<String>,
     #[arg(short = 's', long)]
     pub state: Option<String>,
@@ -1189,7 +1275,7 @@ pub struct PipelinePrsArgs {
 pub struct PipelinePrArgs {
     #[arg(long)]
     pub project_id: String,
-    #[arg(short = 'R', long = "repo")]
+    #[arg(short = 'R', long = "repo", value_parser = parse_gitcode_repository_arg)]
     pub repository: Option<String>,
     #[arg(long = "pr", alias = "mr")]
     pub number: u64,
@@ -1224,6 +1310,11 @@ pub enum Shell {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn diagnostic<const N: usize>(args: [&str; N]) -> ParseDiagnostic {
+        let error = Cli::try_parse_from(args).unwrap_err();
+        ParseDiagnostic::from_error(args, &error)
+    }
 
     #[test]
     fn parses_repo_view_with_json_flag() {
@@ -1419,6 +1510,137 @@ mod tests {
         let value: serde_json::Value = serde_json::from_str(&stderr).unwrap();
         assert_eq!(value["matched_path"], serde_json::json!(["repo", "list"]));
         assert_eq!(value["unexpected_token"], "--limt");
+    }
+
+    #[test]
+    fn parse_diagnostic_reports_invalid_repository_value() {
+        let diagnostic = diagnostic(["gd", "repo", "view", "owner/repo/extra"]);
+
+        assert_eq!(diagnostic.matched_path, ["repo", "view"]);
+        assert_eq!(
+            diagnostic.unexpected_token.as_deref(),
+            Some("owner/repo/extra")
+        );
+        assert!(
+            diagnostic
+                .error
+                .contains("repository must be in owner/repo form")
+        );
+    }
+
+    #[test]
+    fn parse_diagnostic_reports_invalid_github_repository_value() {
+        let diagnostic = diagnostic(["gd", "repo", "sync-github", "https://gitlab.com/o/r"]);
+
+        assert_eq!(diagnostic.matched_path, ["repo", "sync-github"]);
+        assert_eq!(
+            diagnostic.unexpected_token.as_deref(),
+            Some("https://gitlab.com/o/r")
+        );
+        assert!(
+            diagnostic
+                .error
+                .contains("repository must be in owner/repo form")
+        );
+    }
+
+    #[test]
+    fn parse_diagnostic_reports_invalid_workflow_paths() {
+        for diagnostic in [
+            diagnostic(["gd", "pipeline", "set", "ci.yml"]),
+            diagnostic(["gd", "pipeline", "codecheck", "--path", "ci.yml"]),
+            diagnostic(["gd", "pipeline", "run", "workflow", "--file-path", "ci.yml"]),
+        ] {
+            assert_eq!(diagnostic.unexpected_token.as_deref(), Some("ci.yml"));
+            assert!(
+                diagnostic
+                    .error
+                    .contains("workflow path must be under .gitcode/workflows/")
+            );
+        }
+    }
+
+    #[test]
+    fn parse_diagnostic_reports_invalid_workflow_input() {
+        let diagnostic = diagnostic([
+            "gd",
+            "pipeline",
+            "run",
+            "workflow",
+            "--file-path",
+            ".gitcode/workflows/ci.yml",
+            "--input",
+            "missing_equals",
+        ]);
+
+        assert_eq!(diagnostic.matched_path, ["pipeline", "run"]);
+        assert_eq!(
+            diagnostic.unexpected_token.as_deref(),
+            Some("missing_equals")
+        );
+        assert!(
+            diagnostic
+                .error
+                .contains("workflow input must be in key=value form")
+        );
+    }
+
+    #[test]
+    fn parse_diagnostic_reports_invalid_codecheck_secret() {
+        let diagnostic = diagnostic([
+            "gd",
+            "pipeline",
+            "codecheck",
+            "--access-token-secret",
+            "bad-name",
+        ]);
+
+        assert_eq!(diagnostic.matched_path, ["pipeline", "codecheck"]);
+        assert_eq!(diagnostic.unexpected_token.as_deref(), Some("bad-name"));
+        assert!(
+            diagnostic
+                .error
+                .contains("must contain only letters, digits, and '_'")
+        );
+    }
+
+    #[test]
+    fn parse_diagnostic_reports_invalid_api_base() {
+        let diagnostic = diagnostic(["gd", "--api-base", "file:///tmp", "api", "/user"]);
+
+        assert_eq!(diagnostic.matched_path, ["api"]);
+        assert_eq!(diagnostic.unexpected_token.as_deref(), Some("file:///tmp"));
+        assert!(diagnostic.error.contains("must use http or https"));
+    }
+
+    #[test]
+    fn parse_diagnostic_reports_invalid_api_field() {
+        let diagnostic = diagnostic(["gd", "api", "/user", "-F", "missing_equals"]);
+
+        assert_eq!(diagnostic.matched_path, ["api"]);
+        assert_eq!(
+            diagnostic.unexpected_token.as_deref(),
+            Some("missing_equals")
+        );
+        assert!(diagnostic.error.contains("field must be in key=value form"));
+    }
+
+    #[test]
+    fn parse_diagnostic_renders_json_for_invalid_value() {
+        let diagnostic = diagnostic(["gd", "--json", "repo", "view", "owner/repo/extra"]);
+        let stderr = diagnostic.render_stderr();
+
+        assert!(!stderr.contains('\n'));
+        let value: serde_json::Value = serde_json::from_str(&stderr).unwrap();
+        assert_eq!(value["matched_path"], serde_json::json!(["repo", "view"]));
+        assert_eq!(value["unexpected_token"], "owner/repo/extra");
+        assert!(
+            value["expected"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|term| term == "<REPOSITORY>")
+        );
     }
 
     #[test]

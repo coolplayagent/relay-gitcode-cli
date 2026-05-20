@@ -489,7 +489,7 @@ const CODECHECK_LANGUAGES: &[&str] = &[
     "SQL",
 ];
 
-fn validate_codecheck_secret_name(value: &str) -> anyhow::Result<()> {
+pub fn validate_codecheck_secret_name(value: &str) -> anyhow::Result<()> {
     if value.trim().is_empty()
         || !value
             .chars()

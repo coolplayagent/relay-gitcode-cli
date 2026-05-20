@@ -351,7 +351,7 @@ async fn read_text_input(path: &Path) -> anyhow::Result<String> {
         .with_context(|| format!("failed to read {}", path.display()))
 }
 
-fn split_field(field: &str) -> anyhow::Result<(&str, &str)> {
+pub(crate) fn split_field(field: &str) -> anyhow::Result<(&str, &str)> {
     field
         .split_once('=')
         .ok_or_else(|| anyhow::anyhow!("field must be in key=value form: {field}"))

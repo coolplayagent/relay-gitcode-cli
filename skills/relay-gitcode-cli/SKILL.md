@@ -226,6 +226,13 @@ gd api /user --json
 gd --api-base https://api.gitcode.com/api/v5 api /user --json
 ```
 
+Parse-time diagnostics cover unknown commands and flags plus locally known
+structured values such as `owner/repo` repositories, GitHub repository inputs,
+HTTP(S) base URLs, `.gitcode/workflows/` paths, `key=value` API/workflow fields,
+and CodeCheck secret names. With `--json` or `--format json`, parse failures
+write a single-line JSON object to stderr with `error`, `matched_path`,
+`unexpected_token`, `expected`, `suggestion`, and `usage`.
+
 For more command recipes, API automation patterns, and GitCode workflow YAML
 examples, read `references/cli-workflows.md` and
 `references/gitcode-workflow-yml.md`.

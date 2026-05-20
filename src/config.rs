@@ -85,7 +85,7 @@ impl Config {
     }
 }
 
-fn parse_api_base(value: &str) -> anyhow::Result<Url> {
+pub(crate) fn parse_api_base(value: &str) -> anyhow::Result<Url> {
     let mut url = Url::parse(value).with_context(|| format!("invalid api base URL: {value}"))?;
     if url.scheme() != "https" && url.scheme() != "http" {
         bail!("api base URL must use http or https");
