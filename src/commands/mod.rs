@@ -5,6 +5,7 @@ use std::{
 };
 
 use anyhow::{Context, bail};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use clap_complete::{Generator, Shell as CompleteShell, generate};
 use serde_json::{Map, Value, json};
 use tokio::io::AsyncReadExt;
@@ -13,12 +14,14 @@ use tokio::process::Command as TokioCommand;
 use crate::{
     auth::CredentialStore,
     cli::{
-        AuthCommand, Cli, Command, CompletionArgs, IssueCommand, LabelCommand, PipelineAuthCommand,
-        PipelineCommand, PipelineSetMode, PipelineSetupArgs, PrCommand, ReleaseCommand,
-        RepoCommand, SearchCommand, Shell, SshKeyCommand, VersionCommand,
+        AuthCommand, Cli, Command, CompletionArgs, IssueCommand, LabelCommand, MilestoneCommand,
+        PipelineAuthCommand, PipelineCommand, PipelineSetMode, PipelineSetupArgs, PrCommand,
+        PrReviewCommand, ReleaseCommand, RepoCommand, SearchCommand, Shell, SshKeyCommand,
+        TagCommand, VersionCommand,
     },
     client::{ApiRequest, GitcodeClient, form_body, merge_pages, query},
     config::Config,
+    encoding::{encode_path, encode_path_segment},
     env,
     output::{print_json, print_value},
     pipeline::{
@@ -31,7 +34,7 @@ use crate::{
         validate_file_content_source, validate_workflow_path, wait_for_oauth_callback,
         workflow_file_body,
     },
-    release_migration::{ReleaseMigrationOptions, migrate_github_releases},
+    release_migration::{ReleaseMigrationOptions, extract_upload, migrate_github_releases},
     repo,
     update::{UpdateConfig, check_for_updates, render_version_check_text},
 };
@@ -105,6 +108,10 @@ pub async fn run(
                 Command::SshKey(command) => ssh_key_command(command, &client, json_output).await,
                 Command::Label(command) => {
                     label_command(command, &config, &client, json_output).await
+                }
+                Command::Tag(command) => tag_command(command, &config, &client, json_output).await,
+                Command::Milestone(command) => {
+                    milestone_command(command, &config, &client, json_output).await
                 }
                 Command::Release(command) => {
                     release_command(command, &config, &client, json_output).await
@@ -276,7 +283,11 @@ async fn repo_command(
                 ("description", args.description),
                 ("private", Some(args.private.to_string())),
             ]);
-            let value = client.post("user/repos", &body).await?;
+            let endpoint = args
+                .org
+                .map(|org| format!("orgs/{org}/repos"))
+                .unwrap_or_else(|| "user/repos".to_string());
+            let value = client.post(&endpoint, &body).await?;
             print_value(json_output, &value)
         }
         RepoCommand::Move(args) => {
@@ -285,6 +296,370 @@ async fn repo_command(
         }
         RepoCommand::SyncGithub(args) => {
             let value = sync_github_repo(args, config, client, token).await?;
+            print_value(json_output, &value)
+        }
+        RepoCommand::Tree(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let value = client
+                .get(
+                    &format!(
+                        "repos/{repository}/git/trees/{}",
+                        encode_path_segment(&args.sha)
+                    ),
+                    &query([
+                        ("recursive", args.recursive.then_some("1".to_string())),
+                        ("page", Some(args.page.to_string())),
+                        ("per_page", Some(args.limit.to_string())),
+                    ]),
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        RepoCommand::Contents(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let value = client
+                .get(
+                    &format!("repos/{repository}/contents/{}", encode_path(&args.path)),
+                    &query([("ref", args.git_ref)]),
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        RepoCommand::FileList(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let value = client
+                .get(
+                    &format!("repos/{repository}/file_list"),
+                    &query([("ref_name", args.ref_name), ("file_name", args.file_name)]),
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        RepoCommand::FileCreate(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let content = read_repo_file_content(
+                args.content,
+                args.content_file.as_deref(),
+                args.content_base64,
+            )
+            .await?;
+            let body = object_body(
+                [
+                    ("content", Some(Value::String(content))),
+                    ("message", Some(Value::String(args.message))),
+                    ("branch", string_value(args.branch)),
+                    ("author[name]", string_value(args.author_name)),
+                    ("author[email]", string_value(args.author_email)),
+                    ("committer[name]", string_value(args.committer_name)),
+                    ("committer[email]", string_value(args.committer_email)),
+                ],
+                &args.fields,
+            )?;
+            let value = client
+                .post(
+                    &format!("repos/{repository}/contents/{}", encode_path(&args.path)),
+                    &body,
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        RepoCommand::FileUpdate(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let content = read_repo_file_content(
+                args.content,
+                args.content_file.as_deref(),
+                args.content_base64,
+            )
+            .await?;
+            let body = object_body(
+                [
+                    ("content", Some(Value::String(content))),
+                    ("message", Some(Value::String(args.message))),
+                    ("sha", Some(Value::String(args.sha))),
+                    ("branch", string_value(args.branch)),
+                    ("author[name]", string_value(args.author_name)),
+                    ("author[email]", string_value(args.author_email)),
+                    ("committer[name]", string_value(args.committer_name)),
+                    ("committer[email]", string_value(args.committer_email)),
+                ],
+                &args.fields,
+            )?;
+            let value = client
+                .put(
+                    &format!("repos/{repository}/contents/{}", encode_path(&args.path)),
+                    &body,
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        RepoCommand::FileDelete(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let body = object_body(
+                [
+                    ("sha", Some(Value::String(args.sha))),
+                    ("message", Some(Value::String(args.message))),
+                    ("branch", string_value(args.branch)),
+                ],
+                &args.fields,
+            )?;
+            let value = client
+                .delete_with_body(
+                    &format!("repos/{repository}/contents/{}", encode_path(&args.path)),
+                    &body,
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        RepoCommand::Blob(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let value = client
+                .get(&format!("repos/{repository}/git/blobs/{}", args.sha), &[])
+                .await?;
+            print_value(json_output, &value)
+        }
+        RepoCommand::Languages(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let value = client
+                .get(&format!("repos/{repository}/languages"), &[])
+                .await?;
+            print_value(json_output, &value)
+        }
+        RepoCommand::Contributors(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let value = client
+                .get(
+                    &format!("repos/{repository}/contributors"),
+                    &paged_query(1, args.limit),
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        RepoCommand::ModuleEdit(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let body = field_body(&args.fields)?;
+            let value = client
+                .put(&format!("repos/{repository}/module/setting"), &body)
+                .await?;
+            print_value(json_output, &value)
+        }
+        RepoCommand::SettingsEdit(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let body = field_body(&args.fields)?;
+            let value = client.patch(&format!("repos/{repository}"), &body).await?;
+            print_value(json_output, &value)
+        }
+        RepoCommand::ReviewerEdit(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let body = field_body(&args.fields)?;
+            let value = client
+                .put(&format!("repos/{repository}/reviewer"), &body)
+                .await?;
+            print_value(json_output, &value)
+        }
+        RepoCommand::Archive(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let (owner, repo_name) = repo::split_repo(&repository)?;
+            let body = field_body(&args.fields)?;
+            let value = client
+                .put(&format!("org/{owner}/repo/{repo_name}/status"), &body)
+                .await?;
+            print_value(json_output, &value)
+        }
+        RepoCommand::Delete(args) => {
+            repo::split_repo(&args.repository)?;
+            let value = client.delete(&format!("repos/{}", args.repository)).await?;
+            print_value(json_output, &value)
+        }
+        RepoCommand::Permission(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let value = client
+                .get(&format!("repos/{repository}/transition"), &[])
+                .await?;
+            print_value(json_output, &value)
+        }
+        RepoCommand::PermissionEdit(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let body = field_body(&args.fields)?;
+            let value = client
+                .put(&format!("repos/{repository}/transition"), &body)
+                .await?;
+            print_value(json_output, &value)
+        }
+        RepoCommand::PushRules(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let value = client
+                .get(&format!("repos/{repository}/push_config"), &[])
+                .await?;
+            print_value(json_output, &value)
+        }
+        RepoCommand::PushRulesEdit(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let body = field_body(&args.fields)?;
+            let value = client
+                .put(&format!("repos/{repository}/push_config"), &body)
+                .await?;
+            print_value(json_output, &value)
+        }
+        RepoCommand::Forks(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let value = client
+                .get(
+                    &format!("repos/{repository}/forks"),
+                    &paged_query(args.page, args.limit),
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        RepoCommand::ImageUpload(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let value = upload_repository_image(
+                client,
+                &format!("repos/{repository}/img/upload"),
+                args.file,
+                args.name,
+                &args.fields,
+            )
+            .await?;
+            print_value(json_output, &value)
+        }
+        RepoCommand::FileUpload(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let value = upload_repository_file(
+                client,
+                &format!("repos/{repository}/file/upload"),
+                args.file,
+                args.name,
+                &args.fields,
+            )
+            .await?;
+            print_value(json_output, &value)
+        }
+        RepoCommand::Subscribers(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let value = client
+                .get(
+                    &format!("repos/{repository}/subscribers"),
+                    &paged_query(args.page, args.limit),
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        RepoCommand::Stargazers(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let value = client
+                .get(
+                    &format!("repos/{repository}/stargazers"),
+                    &paged_query(args.page, args.limit),
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        RepoCommand::Settings(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let value = client
+                .get(&format!("repos/{repository}/repo_settings"), &[])
+                .await?;
+            print_value(json_output, &value)
+        }
+        RepoCommand::RepoSettingsEdit(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let body = field_body(&args.fields)?;
+            let value = client
+                .put(&format!("repos/{repository}/repo_settings"), &body)
+                .await?;
+            print_value(json_output, &value)
+        }
+        RepoCommand::PullRequestSettings(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let value = client
+                .get(&format!("repos/{repository}/pull_request_settings"), &[])
+                .await?;
+            print_value(json_output, &value)
+        }
+        RepoCommand::PullRequestSettingsEdit(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let body = field_body(&args.fields)?;
+            let value = client
+                .put(&format!("repos/{repository}/pull_request_settings"), &body)
+                .await?;
+            print_value(json_output, &value)
+        }
+        RepoCommand::MemberRole(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let body = field_body(&args.fields)?;
+            let value = client
+                .put(
+                    &format!("repos/{repository}/members/{}", args.username),
+                    &body,
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        RepoCommand::CustomRoles(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let value = client
+                .get(&format!("repos/{repository}/customized_roles"), &[])
+                .await?;
+            print_value(json_output, &value)
+        }
+        RepoCommand::DownloadStats(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let value = client
+                .get(
+                    &format!("repos/{repository}/download_statistics"),
+                    &query([
+                        ("start_date", args.start_date),
+                        ("end_date", args.end_date),
+                        ("direction", args.direction),
+                    ]),
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        RepoCommand::Raw(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let value = client
+                .get(
+                    &format!("repos/{repository}/raw/{}", encode_path(&args.path)),
+                    &query([("ref", args.git_ref)]),
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        RepoCommand::ContributorStats(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let value = client
+                .get(
+                    &format!("repos/{repository}/contributors/statistic"),
+                    &query([
+                        ("author", args.author),
+                        (
+                            "current_user",
+                            args.current_user.then_some("true".to_string()),
+                        ),
+                        ("since", args.since),
+                        ("until", args.until),
+                        ("ref_name", args.ref_name),
+                    ]),
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        RepoCommand::Events(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let value = client
+                .get(
+                    &format!("repos/{repository}/events"),
+                    &query([
+                        ("filter", args.filter),
+                        ("author", args.author),
+                        ("before", args.before),
+                        ("after", args.after),
+                        ("page", Some(args.page.to_string())),
+                        ("per_page", Some(args.limit.to_string())),
+                    ]),
+                )
+                .await?;
             print_value(json_output, &value)
         }
     }
@@ -782,6 +1157,185 @@ async fn current_user_login(client: &GitcodeClient) -> anyhow::Result<String> {
         .context("GitCode user response did not include login")
 }
 
+async fn resolve_repository(config: &Config, repository: Option<&str>) -> anyhow::Result<String> {
+    repo::resolve_repo(repository, config.default_repo.as_deref()).await
+}
+
+fn paged_query(page: u64, limit: u64) -> Vec<(&'static str, String)> {
+    vec![("page", page.to_string()), ("per_page", limit.to_string())]
+}
+
+fn field_body(fields: &[String]) -> anyhow::Result<Value> {
+    let mut body = Map::new();
+    append_fields(&mut body, fields)?;
+    Ok(Value::Object(body))
+}
+
+fn object_body(
+    entries: impl IntoIterator<Item = (&'static str, Option<Value>)>,
+    fields: &[String],
+) -> anyhow::Result<Value> {
+    let mut body = Map::new();
+    for (key, value) in entries {
+        if let Some(value) = value {
+            body.insert(key.to_string(), value);
+        }
+    }
+    append_fields(&mut body, fields)?;
+    Ok(Value::Object(body))
+}
+
+fn form_fields(
+    entries: impl IntoIterator<Item = (&'static str, Option<String>)>,
+    fields: &[String],
+) -> anyhow::Result<Vec<(String, String)>> {
+    let mut output = Vec::new();
+    for (key, value) in entries {
+        if let Some(value) = value {
+            output.push((key.to_string(), value));
+        }
+    }
+    for field in fields {
+        let Some((key, value)) = field.split_once('=') else {
+            bail!("field must be in key=value form: {field}");
+        };
+        output.push((key.to_string(), value.to_string()));
+    }
+    Ok(output)
+}
+
+fn append_fields(body: &mut Map<String, Value>, fields: &[String]) -> anyhow::Result<()> {
+    for field in fields {
+        let Some((key, value)) = field.split_once('=') else {
+            bail!("field must be in key=value form: {field}");
+        };
+        body.insert(key.to_string(), parse_field_value(value));
+    }
+    Ok(())
+}
+
+fn parse_field_value(value: &str) -> Value {
+    match value {
+        "true" => Value::Bool(true),
+        "false" => Value::Bool(false),
+        "null" => Value::Null,
+        _ => value
+            .parse::<i64>()
+            .map(Value::from)
+            .or_else(|_| value.parse::<f64>().map(Value::from))
+            .unwrap_or_else(|_| Value::String(value.to_string())),
+    }
+}
+
+fn string_value(value: Option<String>) -> Option<Value> {
+    value.map(Value::String)
+}
+
+fn bool_value(value: bool) -> Option<Value> {
+    value.then_some(Value::Bool(true))
+}
+
+fn optional_bool_value(value: Option<bool>) -> Option<Value> {
+    value.map(Value::Bool)
+}
+
+fn number_value(value: Option<u64>) -> Option<Value> {
+    value.map(Value::from)
+}
+
+fn string_array(values: Vec<String>) -> Value {
+    Value::Array(values.into_iter().map(Value::String).collect())
+}
+
+async fn read_repo_file_content(
+    content: Option<String>,
+    file: Option<&Path>,
+    content_base64: bool,
+) -> anyhow::Result<String> {
+    let bytes = if let Some(content) = content {
+        content.into_bytes()
+    } else if let Some(file) = file {
+        if file == Path::new("-") {
+            let mut bytes = Vec::new();
+            tokio::io::stdin()
+                .read_to_end(&mut bytes)
+                .await
+                .context("failed to read content from stdin")?;
+            bytes
+        } else {
+            tokio::fs::read(file)
+                .await
+                .with_context(|| format!("failed to read {}", file.display()))?
+        }
+    } else {
+        bail!("set file content with --content or --content-file");
+    };
+
+    if content_base64 {
+        String::from_utf8(bytes).context("base64 content must be valid UTF-8")
+    } else {
+        Ok(BASE64_STANDARD.encode(bytes))
+    }
+}
+
+async fn upload_repository_file(
+    client: &GitcodeClient,
+    endpoint: &str,
+    args_file: PathBuf,
+    name: Option<String>,
+    fields: &[String],
+) -> anyhow::Result<Value> {
+    let bytes = tokio::fs::read(&args_file)
+        .await
+        .with_context(|| format!("failed to read {}", args_file.display()))?;
+    let file_name = name.unwrap_or_else(|| {
+        args_file
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("upload")
+            .to_string()
+    });
+    let extra_fields = fields
+        .iter()
+        .map(|field| {
+            let Some((key, value)) = field.split_once('=') else {
+                bail!("field must be in key=value form: {field}");
+            };
+            Ok((key.to_string(), value.to_string()))
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    client
+        .upload_multipart_file(endpoint, "file", &file_name, bytes, &extra_fields)
+        .await
+}
+
+async fn upload_repository_image(
+    client: &GitcodeClient,
+    endpoint: &str,
+    args_file: PathBuf,
+    name: Option<String>,
+    fields: &[String],
+) -> anyhow::Result<Value> {
+    let bytes = tokio::fs::read(&args_file)
+        .await
+        .with_context(|| format!("failed to read {}", args_file.display()))?;
+    let file_name = name.unwrap_or_else(|| {
+        args_file
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("upload")
+            .to_string()
+    });
+    let body = object_body(
+        [
+            ("body", Some(Value::String(BASE64_STANDARD.encode(bytes)))),
+            ("file_name", Some(Value::String(file_name))),
+        ],
+        fields,
+    )?;
+    client.post(endpoint, &body).await
+}
+
 async fn issue_command(
     command: IssueCommand,
     config: &Config,
@@ -790,54 +1344,249 @@ async fn issue_command(
 ) -> anyhow::Result<()> {
     match command {
         IssueCommand::List(args) => {
-            let repository =
-                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())
-                    .await?;
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
             let value = client
                 .get(
                     &format!("repos/{repository}/issues"),
-                    &[
+                    &query([
+                        ("state", Some(args.state)),
+                        ("labels", join(args.label)),
+                        ("sort", args.sort),
+                        ("direction", args.direction),
+                        ("milestone", args.milestone),
+                        ("assignee", args.assignee),
+                        ("creator", args.creator),
+                        ("created_after", args.created_after),
+                        ("created_before", args.created_before),
+                        ("updated_after", args.updated_after),
+                        ("updated_before", args.updated_before),
+                        ("page", Some("1".to_string())),
+                        ("per_page", Some(args.limit.to_string())),
+                    ]),
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        IssueCommand::User(args) => {
+            let value = client
+                .get(
+                    "user/issues",
+                    &query([
                         ("state", args.state),
-                        ("page", "1".to_string()),
-                        ("per_page", args.limit.to_string()),
-                    ],
+                        ("page", Some("1".to_string())),
+                        ("per_page", Some(args.limit.to_string())),
+                    ]),
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        IssueCommand::Org(args) => {
+            let value = client
+                .get(
+                    &format!("orgs/{}/issues", args.org),
+                    &query([
+                        ("state", args.state),
+                        ("page", Some("1".to_string())),
+                        ("per_page", Some(args.limit.to_string())),
+                    ]),
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        IssueCommand::EnterpriseList(args) => {
+            let value = client
+                .get(
+                    &format!("enterprises/{}/issues", args.enterprise),
+                    &query([
+                        ("state", args.state),
+                        ("page", Some("1".to_string())),
+                        ("per_page", Some(args.limit.to_string())),
+                    ]),
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        IssueCommand::EnterpriseView(args) => {
+            let value = client
+                .get(
+                    &format!("enterprises/{}/issues/{}", args.enterprise, args.number),
+                    &[],
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        IssueCommand::EnterpriseComments(args) => {
+            let value = client
+                .get(
+                    &format!(
+                        "enterprises/{}/issues/{}/comments",
+                        args.enterprise, args.number
+                    ),
+                    &paged_query(1, args.limit),
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        IssueCommand::EnterpriseLabels(args) => {
+            let value = client
+                .get(
+                    &format!(
+                        "enterprises/{}/issues/{}/labels",
+                        args.enterprise, args.issue_id
+                    ),
+                    &[],
                 )
                 .await?;
             print_value(json_output, &value)
         }
         IssueCommand::View(args) => {
-            let repository =
-                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())
-                    .await?;
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
             let value = client
                 .get(&format!("repos/{repository}/issues/{}", args.number), &[])
                 .await?;
             print_value(json_output, &value)
         }
         IssueCommand::Create(args) => {
-            let repository =
-                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())
-                    .await?;
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
             let (owner, repo_name) = repo::split_repo(&repository)?;
-            let body = form_body([
-                ("repo", Some(repo_name.to_string())),
-                ("title", Some(args.title)),
-                ("body", args.body),
-                ("labels", join(args.label)),
-                ("assignee", args.assignee),
-            ]);
+            let body = object_body(
+                [
+                    ("repo", Some(Value::String(repo_name.to_string()))),
+                    ("title", Some(Value::String(args.title))),
+                    ("body", string_value(args.body)),
+                    ("labels", string_value(join(args.label))),
+                    ("assignee", string_value(args.assignee)),
+                    ("milestone", number_value(args.milestone)),
+                    ("security_hole", optional_bool_value(args.security_hole)),
+                ],
+                &[],
+            )?;
             let value = client.post(&format!("repos/{owner}/issues"), &body).await?;
             print_value(json_output, &value)
         }
+        IssueCommand::Edit(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let (owner, repo_name) = repo::split_repo(&repository)?;
+            let body = object_body(
+                [
+                    ("repo", Some(Value::String(repo_name.to_string()))),
+                    ("title", string_value(args.title)),
+                    ("body", string_value(args.body)),
+                    ("state", string_value(args.state)),
+                    ("assignee", string_value(args.assignee)),
+                    ("milestone", number_value(args.milestone)),
+                    ("labels", string_value(join(args.label))),
+                    ("security_hole", optional_bool_value(args.security_hole)),
+                ],
+                &[],
+            )?;
+            let value = client
+                .patch(&format!("repos/{owner}/issues/{}", args.number), &body)
+                .await?;
+            print_value(json_output, &value)
+        }
         IssueCommand::Comment(args) => {
-            let repository =
-                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())
-                    .await?;
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
             let body = json!({ "body": args.body });
             let value = client
                 .post(
                     &format!("repos/{repository}/issues/{}/comments", args.number),
                     &body,
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        IssueCommand::Comments(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let value = client
+                .get(
+                    &format!("repos/{repository}/issues/{}/comments", args.number),
+                    &paged_query(args.page, args.limit),
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        IssueCommand::RepoComments(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let value = client
+                .get(
+                    &format!("repos/{repository}/issues/comments"),
+                    &paged_query(args.page, args.limit),
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        IssueCommand::CommentView(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let value = client
+                .get(
+                    &format!("repos/{repository}/issues/comments/{}", args.id),
+                    &[],
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        IssueCommand::CommentEdit(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let body = json!({ "body": args.body });
+            let value = client
+                .patch(
+                    &format!("repos/{repository}/issues/comments/{}", args.id),
+                    &body,
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        IssueCommand::CommentDelete(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let value = client
+                .delete(&format!("repos/{repository}/issues/comments/{}", args.id))
+                .await?;
+            print_value(json_output, &value)
+        }
+        IssueCommand::Prs(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let value = client
+                .get(
+                    &format!("repos/{repository}/issues/{}/pull_requests", args.number),
+                    &paged_query(1, args.limit),
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        IssueCommand::LabelAdd(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let value = client
+                .post(
+                    &format!("repos/{repository}/issues/{}/labels", args.number),
+                    &string_array(args.labels),
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        IssueCommand::LabelRemove(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let value = client
+                .delete(&format!(
+                    "repos/{repository}/issues/{}/labels/{}",
+                    args.number,
+                    encode_path_segment(&args.name)
+                ))
+                .await?;
+            print_value(json_output, &value)
+        }
+        IssueCommand::Logs(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let (owner, repo_name) = repo::split_repo(&repository)?;
+            let value = client
+                .get(
+                    &format!("repos/{owner}/issues/{}/operate_logs", args.number),
+                    &query([
+                        ("repo", Some(repo_name.to_string())),
+                        ("sort", args.sort),
+                        ("page", Some(args.page.to_string())),
+                        ("per_page", Some(args.limit.to_string())),
+                    ]),
                 )
                 .await?;
             print_value(json_output, &value)
@@ -853,15 +1602,15 @@ async fn pr_command(
 ) -> anyhow::Result<()> {
     match command {
         PrCommand::List(args) => {
-            let repository =
-                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())
-                    .await?;
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
             let value = client
                 .get(
                     &format!("repos/{repository}/pulls"),
                     &query([
                         ("state", Some(args.state)),
                         ("base", args.base),
+                        ("sort", args.sort),
+                        ("direction", args.direction),
                         ("page", Some("1".to_string())),
                         ("per_page", Some(args.limit.to_string())),
                     ]),
@@ -869,51 +1618,196 @@ async fn pr_command(
                 .await?;
             print_value(json_output, &value)
         }
+        PrCommand::Org(args) => {
+            let value = client
+                .get(
+                    &format!("org/{}/pull_requests", args.org),
+                    &query([
+                        ("state", args.state),
+                        (
+                            "issue_number",
+                            args.issue_number.map(|value| value.to_string()),
+                        ),
+                        ("sort", args.sort),
+                        ("direction", args.direction),
+                        ("page", Some("1".to_string())),
+                        ("per_page", Some(args.limit.to_string())),
+                    ]),
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        PrCommand::Enterprise(args) => {
+            let value = client
+                .get(
+                    &format!("enterprises/{}/pull_requests", args.enterprise),
+                    &query([
+                        ("state", args.state),
+                        ("page", Some("1".to_string())),
+                        ("per_page", Some(args.limit.to_string())),
+                    ]),
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        PrCommand::EnterpriseIssuePrs(args) => {
+            let value = client
+                .get(
+                    &format!(
+                        "enterprises/{}/issues/{}/pull_requests",
+                        args.enterprise, args.number
+                    ),
+                    &[],
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
         PrCommand::View(args) => {
-            let repository =
-                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())
-                    .await?;
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
             let value = client
                 .get(&format!("repos/{repository}/pulls/{}", args.number), &[])
                 .await?;
             print_value(json_output, &value)
         }
         PrCommand::Create(args) => {
-            let repository =
-                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())
-                    .await?;
-            let body = form_body([
-                ("title", Some(args.title)),
-                ("body", args.body),
-                ("base", Some(args.base)),
-                ("head", Some(args.head)),
-                ("labels", join(args.label)),
-                ("assignees", join(args.assignee)),
-            ]);
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let body = object_body(
+                [
+                    ("title", Some(Value::String(args.title))),
+                    ("body", string_value(args.body)),
+                    ("base", Some(Value::String(args.base))),
+                    ("head", Some(Value::String(args.head))),
+                    ("labels", string_value(join(args.label))),
+                    ("assignees", string_value(join(args.assignee))),
+                    ("testers", string_value(join(args.tester))),
+                    ("milestone_number", number_value(args.milestone_number)),
+                    ("issue", string_value(args.issue)),
+                    ("prune_source_branch", bool_value(args.prune_source_branch)),
+                    ("draft", bool_value(args.draft)),
+                    ("squash", bool_value(args.squash)),
+                    (
+                        "squash_commit_message",
+                        string_value(args.squash_commit_message),
+                    ),
+                    ("fork_path", string_value(args.fork_path)),
+                ],
+                &[],
+            )?;
             let value = client
                 .post(&format!("repos/{repository}/pulls"), &body)
                 .await?;
             print_value(json_output, &value)
         }
+        PrCommand::Edit(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let body = object_body(
+                [
+                    ("title", string_value(args.title)),
+                    ("body", string_value(args.body)),
+                    ("state", string_value(args.state)),
+                    ("milestone_number", number_value(args.milestone_number)),
+                    ("labels", string_value(join(args.label))),
+                    ("draft", optional_bool_value(args.draft)),
+                ],
+                &[],
+            )?;
+            let value = client
+                .patch(&format!("repos/{repository}/pulls/{}", args.number), &body)
+                .await?;
+            print_value(json_output, &value)
+        }
+        PrCommand::Merge(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let body = json!({ "merge_method": args.merge_method });
+            let value = client
+                .put(
+                    &format!("repos/{repository}/pulls/{}/merge", args.number),
+                    &body,
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        PrCommand::MergeStatus(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let value = client
+                .get(
+                    &format!("repos/{repository}/pulls/{}/merge", args.number),
+                    &[],
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        PrCommand::Commits(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let value = client
+                .get(
+                    &format!("repos/{repository}/pulls/{}/commits", args.number),
+                    &paged_query(args.page, args.limit),
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        PrCommand::Files(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let value = client
+                .get(
+                    &format!("repos/{repository}/pulls/{}/files", args.number),
+                    &[],
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        PrCommand::Changes(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let value = client
+                .get(
+                    &format!("repos/{repository}/pulls/{}/files.json", args.number),
+                    &[],
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        PrCommand::Issues(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let value = client
+                .get(
+                    &format!("repos/{repository}/pulls/{}/issues", args.number),
+                    &paged_query(args.page, args.limit),
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        PrCommand::Logs(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let value = client
+                .get(
+                    &format!("repos/{repository}/pulls/{}/operate_logs", args.number),
+                    &query([
+                        ("sort", args.sort),
+                        ("page", Some(args.page.to_string())),
+                        ("per_page", Some(args.limit.to_string())),
+                    ]),
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
         PrCommand::Comments(args) => {
-            let repository =
-                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())
-                    .await?;
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
             let value = client
                 .get(
                     &format!("repos/{repository}/pulls/{}/comments", args.number),
-                    &[
-                        ("page", args.page.to_string()),
-                        ("per_page", args.limit.to_string()),
-                    ],
+                    &query([
+                        ("page", Some(args.page.to_string())),
+                        ("per_page", Some(args.limit.to_string())),
+                        ("direction", args.direction),
+                        ("comment_type", args.comment_type),
+                    ]),
                 )
                 .await?;
             print_value(json_output, &value)
         }
         PrCommand::Comment(args) => {
-            let repository =
-                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())
-                    .await?;
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
             let mut body = serde_json::Map::new();
             body.insert("body".to_string(), Value::String(args.body));
             if let Some(path) = args.path {
@@ -935,9 +1829,7 @@ async fn pr_command(
             print_value(json_output, &value)
         }
         PrCommand::Reply(args) => {
-            let repository =
-                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())
-                    .await?;
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
             let body = json!({ "body": args.body });
             let value = client
                 .post(
@@ -945,6 +1837,175 @@ async fn pr_command(
                         "repos/{repository}/pulls/{}/discussions/{}/comments",
                         args.number, args.discussion_id
                     ),
+                    &body,
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        PrCommand::CommentView(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let value = client
+                .get(
+                    &format!("repos/{repository}/pulls/comments/{}", args.id),
+                    &[],
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        PrCommand::CommentEdit(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let body = json!({ "body": args.body });
+            let value = client
+                .patch(
+                    &format!("repos/{repository}/pulls/comments/{}", args.id),
+                    &body,
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        PrCommand::CommentDelete(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let value = client
+                .delete(&format!("repos/{repository}/pulls/comments/{}", args.id))
+                .await?;
+            print_value(json_output, &value)
+        }
+        PrCommand::Labels(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let value = client
+                .get(
+                    &format!("repos/{repository}/pulls/{}/labels", args.number),
+                    &[],
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        PrCommand::LabelAdd(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let value = client
+                .post(
+                    &format!("repos/{repository}/pulls/{}/labels", args.number),
+                    &string_array(args.labels),
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        PrCommand::LabelRemove(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let value = client
+                .delete(&format!(
+                    "repos/{repository}/pulls/{}/labels/{}",
+                    args.number,
+                    encode_path_segment(&args.name)
+                ))
+                .await?;
+            print_value(json_output, &value)
+        }
+        PrCommand::LabelReplace(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let value = client
+                .put(
+                    &format!("repos/{repository}/pulls/{}/labels", args.number),
+                    &string_array(args.labels),
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        PrCommand::Review(command) => pr_review_command(command, config, client, json_output).await,
+    }
+}
+
+async fn pr_review_command(
+    command: PrReviewCommand,
+    config: &Config,
+    client: &GitcodeClient,
+    json_output: bool,
+) -> anyhow::Result<()> {
+    match command {
+        PrReviewCommand::Approve(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let body = object_body([("force", bool_value(args.force))], &[])?;
+            let value = client
+                .post(
+                    &format!("repos/{repository}/pulls/{}/review", args.number),
+                    &body,
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        PrReviewCommand::Test(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let body = object_body([("force", bool_value(args.force))], &[])?;
+            let value = client
+                .post(
+                    &format!("repos/{repository}/pulls/{}/test", args.number),
+                    &body,
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        PrReviewCommand::ResetApproval(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let body = object_body(
+                [
+                    ("reset_all", bool_value(args.reset_all)),
+                    ("assignees", string_value(join(args.users))),
+                ],
+                &[],
+            )?;
+            let value = client
+                .patch(
+                    &format!("repos/{repository}/pulls/{}/assignees", args.number),
+                    &body,
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        PrReviewCommand::ResetTest(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let body = object_body(
+                [
+                    ("reset_all", bool_value(args.reset_all)),
+                    ("testers", string_value(join(args.users))),
+                ],
+                &[],
+            )?;
+            let value = client
+                .patch(
+                    &format!("repos/{repository}/pulls/{}/testers", args.number),
+                    &body,
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        PrReviewCommand::AssignApprover(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let body = object_body([("assignees", string_value(join(args.users)))], &[])?;
+            let value = client
+                .post(
+                    &format!("repos/{repository}/pulls/{}/assignees", args.number),
+                    &body,
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        PrReviewCommand::CancelApprover(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let body = object_body([("assignees", string_value(join(args.users)))], &[])?;
+            let value = client
+                .delete_with_body(
+                    &format!("repos/{repository}/pulls/{}/assignees", args.number),
+                    &body,
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        PrReviewCommand::AssignTester(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let body = object_body([("testers", string_value(join(args.users)))], &[])?;
+            let value = client
+                .post(
+                    &format!("repos/{repository}/pulls/{}/testers", args.number),
                     &body,
                 )
                 .await?;
@@ -1027,13 +2088,16 @@ async fn label_command(
             let repository =
                 repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())
                     .await?;
-            let body = form_body([
-                ("name", Some(args.name)),
-                ("color", args.color),
-                ("description", args.description),
-            ]);
+            let body = form_fields(
+                [
+                    ("name", Some(args.name)),
+                    ("color", args.color),
+                    ("description", args.description),
+                ],
+                &[],
+            )?;
             let value = client
-                .post(&format!("repos/{repository}/labels"), &body)
+                .post_form(&format!("repos/{repository}/labels"), &body)
                 .await?;
             print_value(json_output, &value)
         }
@@ -1041,13 +2105,22 @@ async fn label_command(
             let repository =
                 repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())
                     .await?;
-            let body = form_body([
-                ("name", args.new_name),
-                ("color", args.color),
-                ("description", args.description),
-            ]);
+            let body = form_fields(
+                [
+                    ("name", args.new_name),
+                    ("color", args.color),
+                    ("description", args.description),
+                ],
+                &[],
+            )?;
             let value = client
-                .patch(&format!("repos/{repository}/labels/{}", args.name), &body)
+                .patch_form(
+                    &format!(
+                        "repos/{repository}/labels/{}",
+                        encode_path_segment(&args.name)
+                    ),
+                    &body,
+                )
                 .await?;
             print_value(json_output, &value)
         }
@@ -1056,7 +2129,177 @@ async fn label_command(
                 repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())
                     .await?;
             let value = client
-                .delete(&format!("repos/{repository}/labels/{}", args.name))
+                .delete(&format!(
+                    "repos/{repository}/labels/{}",
+                    encode_path_segment(&args.name)
+                ))
+                .await?;
+            print_value(json_output, &value)
+        }
+    }
+}
+
+async fn tag_command(
+    command: TagCommand,
+    config: &Config,
+    client: &GitcodeClient,
+    json_output: bool,
+) -> anyhow::Result<()> {
+    match command {
+        TagCommand::List(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let value = client
+                .get(
+                    &format!("repos/{repository}/tags"),
+                    &paged_query(args.page, args.limit),
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        TagCommand::Create(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let body = object_body(
+                [
+                    ("refs", Some(Value::String(args.refs))),
+                    ("tag_name", Some(Value::String(args.tag_name))),
+                    ("tag_message", string_value(args.message)),
+                ],
+                &[],
+            )?;
+            let value = client
+                .post(&format!("repos/{repository}/tags"), &body)
+                .await?;
+            print_value(json_output, &value)
+        }
+        TagCommand::ProtectedList(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let value = client
+                .get(
+                    &format!("repos/{repository}/protected_tags"),
+                    &paged_query(args.page, args.limit),
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        TagCommand::ProtectedView(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let value = client
+                .get(
+                    &format!(
+                        "repos/{repository}/protected_tags/{}",
+                        encode_path_segment(&args.name)
+                    ),
+                    &[],
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        TagCommand::ProtectedCreate(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let body = json!({
+                "name": args.name,
+                "create_access_level": args.create_access_level
+            });
+            let value = client
+                .post(&format!("repos/{repository}/protected_tags"), &body)
+                .await?;
+            print_value(json_output, &value)
+        }
+        TagCommand::ProtectedEdit(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let body = json!({
+                "name": args.name,
+                "create_access_level": args.create_access_level
+            });
+            let value = client
+                .put(&format!("repos/{repository}/protected_tags"), &body)
+                .await?;
+            print_value(json_output, &value)
+        }
+        TagCommand::ProtectedDelete(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let value = client
+                .delete(&format!(
+                    "repos/{repository}/protected_tags/{}",
+                    encode_path_segment(&args.name)
+                ))
+                .await?;
+            print_value(json_output, &value)
+        }
+    }
+}
+
+async fn milestone_command(
+    command: MilestoneCommand,
+    config: &Config,
+    client: &GitcodeClient,
+    json_output: bool,
+) -> anyhow::Result<()> {
+    match command {
+        MilestoneCommand::List(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let value = client
+                .get(
+                    &format!("repos/{repository}/milestones"),
+                    &query([
+                        ("state", Some(args.state)),
+                        ("sort", args.sort),
+                        ("direction", args.direction),
+                        ("page", Some(args.page.to_string())),
+                        ("per_page", Some(args.limit.to_string())),
+                    ]),
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        MilestoneCommand::View(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let value = client
+                .get(
+                    &format!("repos/{repository}/milestones/{}", args.number),
+                    &[],
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        MilestoneCommand::Create(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let body = object_body(
+                [
+                    ("title", Some(Value::String(args.title))),
+                    ("description", string_value(args.description)),
+                    ("due_on", Some(Value::String(args.due_on))),
+                ],
+                &[],
+            )?;
+            let value = client
+                .post(&format!("repos/{repository}/milestones"), &body)
+                .await?;
+            print_value(json_output, &value)
+        }
+        MilestoneCommand::Edit(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let body = object_body(
+                [
+                    ("title", string_value(args.title)),
+                    ("state", string_value(args.state)),
+                    ("description", string_value(args.description)),
+                    ("due_on", string_value(args.due_on)),
+                ],
+                &[],
+            )?;
+            let value = client
+                .patch(
+                    &format!("repos/{repository}/milestones/{}", args.number),
+                    &body,
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
+        MilestoneCommand::Delete(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let value = client
+                .delete(&format!("repos/{repository}/milestones/{}", args.number))
                 .await?;
             print_value(json_output, &value)
         }
@@ -1091,31 +2334,120 @@ async fn release_command(
                     .await?;
             let value = client
                 .get(
-                    &format!("repos/{repository}/releases/tags/{}", args.tag),
+                    &format!(
+                        "repos/{repository}/releases/tags/{}",
+                        encode_path_segment(&args.tag)
+                    ),
                     &[],
                 )
                 .await?;
             print_value(json_output, &value)
         }
+        ReleaseCommand::ViewId(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let value = client
+                .get(&format!("repos/{repository}/releases/{}", args.id), &[])
+                .await?;
+            print_value(json_output, &value)
+        }
         ReleaseCommand::Create(args) => {
-            let repository =
-                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())
-                    .await?;
-            let body = form_body([
-                ("tag_name", Some(args.tag)),
-                ("name", args.title),
-                ("body", args.notes),
-                ("target_commitish", args.target),
-            ]);
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let body = object_body(
+                [
+                    ("tag_name", Some(Value::String(args.tag))),
+                    ("name", string_value(args.title)),
+                    ("body", string_value(args.notes)),
+                    ("target_commitish", string_value(args.target)),
+                    ("prerelease", bool_value(args.prerelease)),
+                ],
+                &[],
+            )?;
             let value = client
                 .post(&format!("repos/{repository}/releases"), &body)
                 .await?;
             print_value(json_output, &value)
         }
+        ReleaseCommand::Edit(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let current = client
+                .get(&format!("repos/{repository}/releases/{}", args.id), &[])
+                .await?;
+            let tag = args.tag.unwrap_or(required_value_string(
+                &current,
+                &["tag_name", "tag"],
+                "tag_name",
+            )?);
+            let title = args
+                .title
+                .unwrap_or(required_value_string(&current, &["name"], "name")?);
+            let notes = args
+                .notes
+                .unwrap_or(required_value_string(&current, &["body"], "body")?);
+            let target = args
+                .target
+                .or_else(|| optional_value_string(&current, &["target_commitish"]));
+            let prerelease = args
+                .prerelease
+                .or_else(|| current.get("prerelease").and_then(Value::as_bool));
+            let body = object_body(
+                [
+                    ("tag_name", Some(Value::String(tag))),
+                    ("name", Some(Value::String(title))),
+                    ("body", Some(Value::String(notes))),
+                    ("target_commitish", string_value(target)),
+                    ("prerelease", optional_bool_value(prerelease)),
+                ],
+                &[],
+            )?;
+            let value = client
+                .patch(&format!("repos/{repository}/releases/{}", args.id), &body)
+                .await?;
+            print_value(json_output, &value)
+        }
+        ReleaseCommand::Upload(args) => {
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
+            let file_name = args.name.unwrap_or_else(|| {
+                args.file
+                    .file_name()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or("asset")
+                    .to_string()
+            });
+            let response = client
+                .get_response(
+                    &format!(
+                        "repos/{repository}/releases/{}/upload_url",
+                        encode_path_segment(&args.tag)
+                    ),
+                    &[("file_name", file_name.clone())],
+                )
+                .await?;
+            if !response.status.is_success() {
+                bail!(
+                    "GitCode API returned {}: {}",
+                    response.status,
+                    response.body
+                );
+            }
+            let upload = extract_upload(&response).ok_or_else(|| {
+                anyhow::anyhow!("release upload URL response did not include url")
+            })?;
+            let bytes = tokio::fs::read(&args.file)
+                .await
+                .with_context(|| format!("failed to read {}", args.file.display()))?;
+            let value = client
+                .upload_release_asset(
+                    &upload.url,
+                    &upload.headers,
+                    &file_name,
+                    args.content_type.as_deref(),
+                    bytes,
+                )
+                .await?;
+            print_value(json_output, &value)
+        }
         ReleaseCommand::MigrateGithub(args) => {
-            let repository =
-                repo::resolve_repo(args.repository.as_deref(), config.default_repo.as_deref())
-                    .await?;
+            let repository = resolve_repository(config, args.repository.as_deref()).await?;
             let summary = migrate_github_releases(
                 client,
                 ReleaseMigrationOptions {
@@ -1217,7 +2549,7 @@ async fn gitcode_pipeline_command(
                 branch: args.branch,
                 sha: args.sha,
             });
-            let endpoint = format!("repos/{repository}/contents/{path}");
+            let endpoint = format!("repos/{repository}/contents/{}", encode_path(&path));
             let value = match args.mode {
                 PipelineSetMode::Create => api_client.post(&endpoint, &body).await?,
                 PipelineSetMode::Update => api_client.put(&endpoint, &body).await?,
@@ -1259,7 +2591,7 @@ async fn gitcode_pipeline_command(
                 branch: args.commit_branch,
                 sha: args.sha,
             });
-            let endpoint = format!("repos/{repository}/contents/{path}");
+            let endpoint = format!("repos/{repository}/contents/{}", encode_path(&path));
             let value = match args.mode {
                 PipelineSetMode::Create => api_client.post(&endpoint, &body).await?,
                 PipelineSetMode::Update => api_client.put(&endpoint, &body).await?,
@@ -2226,6 +3558,16 @@ fn string_field(value: &Value, keys: &[&str]) -> Option<String> {
     keys.iter()
         .filter_map(|key| value.get(*key).and_then(value_as_string))
         .find(|value| !value.trim().is_empty())
+}
+
+fn optional_value_string(value: &Value, keys: &[&str]) -> Option<String> {
+    keys.iter()
+        .find_map(|key| value.get(*key).and_then(value_as_string))
+}
+
+fn required_value_string(value: &Value, keys: &[&str], field: &str) -> anyhow::Result<String> {
+    optional_value_string(value, keys)
+        .with_context(|| format!("release response did not include {field}"))
 }
 
 fn value_as_string(value: &Value) -> Option<String> {

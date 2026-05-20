@@ -38,6 +38,25 @@ gd repo move owner/repo target-owner --name new-name
 gd repo sync-github coolplayagent/relay-gitcode-cli --org plm-cac --private
 gd repo sync-github git@github.com:owner/repo.git --repo target-org/repo --if-exists skip
 gd repo sync-github owner/repo --repo target-org/repo --method git-push --if-exists update
+gd repo tree main --repo owner/repo --recursive
+gd repo contents README.md --repo owner/repo --ref main
+gd repo file-create README.md --repo owner/repo --message "init" --content "hello"
+gd repo file-update README.md --repo owner/repo --message "update" --sha blob-sha --content-file README.md
+gd repo file-delete old.txt --repo owner/repo --message "delete old" --sha blob-sha
+gd repo raw README.md --repo owner/repo --ref main
+gd repo languages --repo owner/repo
+gd repo contributors --repo owner/repo
+gd repo settings --repo owner/repo
+gd repo settings-edit --repo owner/repo --field has_issues=true
+gd repo pr-settings --repo owner/repo
+gd repo push-rules --repo owner/repo
+gd repo push-rules-edit --repo owner/repo --field max_file_size=10485760
+gd repo forks --repo owner/repo
+gd repo subscribers --repo owner/repo
+gd repo stargazers --repo owner/repo
+gd repo download-stats --repo owner/repo --start-date 2026-01-01
+gd repo contributor-stats --repo owner/repo --current-user
+gd repo events --repo owner/repo --filter push
 ```
 
 `gd repo move` moves a repository to another GitCode user or organization. Pass
@@ -55,21 +74,66 @@ keeps the target writable for GitCode Release creation. Existing targets are
 skipped by default; `--if-exists update` pushes refs to an existing regular
 target, while `--if-exists recreate` deletes and recreates the target.
 
+Low-level repository update endpoints that have broad GitCode-specific request
+shapes accept repeated `--field key=value` entries. Values `true`, `false`,
+`null`, and numbers are sent as JSON scalars; other values are sent as strings.
+
 ## Issue and Pull Request Commands
 
 ```bash
 gd issue list --repo owner/repo
 gd issue view 1 --repo owner/repo
 gd issue create --repo owner/repo --title "bug" --body "details"
+gd issue edit 1 --repo owner/repo --state close
 gd issue comment 1 --repo owner/repo --body "thanks"
+gd issue comments 1 --repo owner/repo --limit 50
+gd issue repo-comments --repo owner/repo
+gd issue comment-view 123 --repo owner/repo
+gd issue comment-edit 123 --repo owner/repo --body "updated"
+gd issue comment-delete 123 --repo owner/repo
+gd issue label-add 1 --repo owner/repo --label bug
+gd issue label-remove 1 bug --repo owner/repo
+gd issue prs 1 --repo owner/repo
+gd issue logs 1 --repo owner/repo
+gd issue user --state open
+gd issue org my-org --state open
+gd issue enterprise-list my-enterprise --state open
 
 gd pr list --repo owner/repo
+gd pr org my-org --state open
+gd pr enterprise my-enterprise --state open
 gd pr view 1 --repo owner/repo
 gd pr create --repo owner/repo --title "change" --body "details" --base main --head feature
+gd pr edit 1 --repo owner/repo --title "new title"
+gd pr merge 1 --repo owner/repo --merge-method squash
+gd pr merge-status 1 --repo owner/repo
+gd pr commits 1 --repo owner/repo
+gd pr files 1 --repo owner/repo
+gd pr changes 1 --repo owner/repo
+gd pr issues 1 --repo owner/repo
+gd pr logs 1 --repo owner/repo
 gd pr comments 1 --repo owner/repo --limit 50
 gd pr comment 1 --repo owner/repo --body "please fix" --path src/main.rs --position 3 --need-to-resolve
 gd pr reply 1 discussion-id --repo owner/repo --body "fixed"
+gd pr comment-view 123 --repo owner/repo
+gd pr comment-edit 123 --repo owner/repo --body "updated"
+gd pr comment-delete 123 --repo owner/repo
+gd pr labels 1 --repo owner/repo
+gd pr label-add 1 --repo owner/repo --label bug
+gd pr label-replace 1 --repo owner/repo --label bug --label docs
+gd pr label-remove 1 bug --repo owner/repo
+gd pr review approve 1 --repo owner/repo
+gd pr review test 1 --repo owner/repo
+gd pr review reset-approval 1 --repo owner/repo --reset-all
+gd pr review reset-test 1 --repo owner/repo --reset-all
+gd pr review assign-approver 1 --repo owner/repo --user alice
+gd pr review cancel-approver 1 --repo owner/repo --user alice
+gd pr review assign-tester 1 --repo owner/repo --user bob
 ```
+
+GitCode models pull request review as approval and test operations, so `gd pr
+review` maps to GitCode approver/tester endpoints rather than GitHub review
+states.
 
 ## Pipeline Commands
 
@@ -143,7 +207,19 @@ gd search issues query
 gd search users query
 gd ssh-key list
 gd label list --repo owner/repo
+gd tag list --repo owner/repo
+gd tag create v1.0.0 --repo owner/repo --ref main --message "v1.0.0"
+gd tag protected-list --repo owner/repo
+gd tag protected-create "v*" --repo owner/repo --create-access-level 30
+gd milestone list --repo owner/repo
+gd milestone create --repo owner/repo --title v1 --due-on 2026-06-01
+gd milestone edit 1 --repo owner/repo --state closed
 gd release list --repo owner/repo
+gd release view v1.0.0 --repo owner/repo
+gd release view-id 1 --repo owner/repo
+gd release create v1.0.0 --repo owner/repo --title v1.0.0 --notes "notes"
+gd release edit 1 --repo owner/repo --title v1.0.0
+gd release upload v1.0.0 dist/app.tar.gz --repo owner/repo
 gd release migrate-github --repo owner/repo --github-repo source/repo --tag v1.0.0
 gd release migrate-github --repo owner/repo --github-repo source/repo --tag v1.0.0 --update-release=false --skip-existing-assets=false
 gd version check

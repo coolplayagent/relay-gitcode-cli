@@ -3,6 +3,7 @@ mod cli;
 mod client;
 mod commands;
 mod config;
+mod encoding;
 mod env;
 mod http;
 mod output;

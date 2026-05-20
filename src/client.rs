@@ -89,6 +89,64 @@ impl GitcodeClient {
         self.request_json("DELETE", endpoint, &[], None).await
     }
 
+    pub async fn post_form(
+        &self,
+        endpoint: &str,
+        fields: &[(String, String)],
+    ) -> anyhow::Result<Value> {
+        self.request_form("POST", endpoint, fields).await
+    }
+
+    pub async fn patch_form(
+        &self,
+        endpoint: &str,
+        fields: &[(String, String)],
+    ) -> anyhow::Result<Value> {
+        self.request_form("PATCH", endpoint, fields).await
+    }
+
+    pub async fn delete_with_body<T: Serialize + ?Sized>(
+        &self,
+        endpoint: &str,
+        body: &T,
+    ) -> anyhow::Result<Value> {
+        self.request_json("DELETE", endpoint, &[], Some(json!(body)))
+            .await
+    }
+
+    pub async fn upload_multipart_file(
+        &self,
+        endpoint: &str,
+        field_name: &str,
+        file_name: &str,
+        bytes: Vec<u8>,
+        fields: &[(String, String)],
+    ) -> anyhow::Result<Value> {
+        let mut form = multipart::Form::new().part(
+            field_name.to_string(),
+            multipart::Part::bytes(bytes).file_name(file_name.to_string()),
+        );
+        for (key, value) in fields {
+            form = form.text(key.clone(), value.clone());
+        }
+
+        let url = self.endpoint_url(endpoint)?;
+        let mut builder = self.http.post(url).multipart(form);
+        builder = self.apply_auth(builder);
+        let response = builder.send().await.context("GitCode file upload failed")?;
+        let status = response.status();
+        let text = response
+            .text()
+            .await
+            .context("failed to read GitCode file upload response")?;
+        let body = parse_response_body(&text)?;
+        if status.is_success() {
+            Ok(body)
+        } else {
+            Err(api_status_error(status, &body))
+        }
+    }
+
     pub async fn upload_multipart_bytes(
         &self,
         upload_url: &str,
@@ -167,6 +225,23 @@ impl GitcodeClient {
         }
     }
 
+    pub async fn upload_release_asset(
+        &self,
+        upload_url: &str,
+        upload_headers: &[(String, String)],
+        file_name: &str,
+        content_type: Option<&str>,
+        bytes: Vec<u8>,
+    ) -> anyhow::Result<Value> {
+        if upload_headers.is_empty() {
+            self.upload_multipart_bytes(upload_url, file_name, content_type, bytes)
+                .await
+        } else {
+            self.upload_raw_bytes(upload_url, upload_headers, content_type, bytes)
+                .await
+        }
+    }
+
     pub async fn api(&self, request: ApiRequest) -> anyhow::Result<Vec<ApiResponse>> {
         let mut responses = Vec::new();
         let method = request.method.parse::<Method>()?;
@@ -213,6 +288,34 @@ impl GitcodeClient {
             url = next_url;
         }
         Ok(responses)
+    }
+
+    async fn request_form(
+        &self,
+        method: &str,
+        endpoint: &str,
+        fields: &[(String, String)],
+    ) -> anyhow::Result<Value> {
+        let method = method.parse::<Method>()?;
+        let url = self.endpoint_url(endpoint)?;
+        let mut form = multipart::Form::new();
+        for (key, value) in fields {
+            form = form.text(key.clone(), value.clone());
+        }
+        let mut builder = self.http.request(method, url).multipart(form);
+        builder = self.apply_auth(builder);
+        let response = builder.send().await.context("GitCode API request failed")?;
+        let status = response.status();
+        let text = response
+            .text()
+            .await
+            .context("failed to read API response")?;
+        let body = parse_response_body(&text)?;
+        if status.is_success() {
+            Ok(body)
+        } else {
+            Err(api_status_error(status, &body))
+        }
     }
 
     async fn request_json(
