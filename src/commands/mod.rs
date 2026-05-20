@@ -19,6 +19,7 @@ use crate::{
     },
     client::{ApiRequest, GitcodeClient, form_body, merge_pages, query},
     config::Config,
+    env,
     output::{print_json, print_value},
     pipeline::{
         CodecheckWorkflowRequest, OpenlibingClient, OpenlibingCredential,
@@ -174,7 +175,7 @@ async fn auth(
                 "hostname": hostname,
                 "logged_in": token.is_some(),
                 "token": if args.show_token { token } else { None },
-                "source": if std::env::var("GITCODE_TOKEN").ok().filter(|v| !v.trim().is_empty()).is_some() {
+                "source": if env::gitcode_token_env().is_some() {
                     "env"
                 } else {
                     "system_keyring"

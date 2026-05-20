@@ -67,10 +67,10 @@ gd pr reply 1 discussion-id --repo owner/repo --body "fixed"
 
 ## Pipeline Commands
 
-GitCode workflow commands use GitCode API credentials from `GITCODE_TOKEN` or
-the system keyring. OpenLibing gate commands use separate OpenLibing GitCode
-OAuth credentials, because GitCode pull-request gate checks are provided by
-OpenLibing. Use `gd pipeline auth login` for browser OAuth, or provide
+GitCode workflow commands use GitCode API credentials from `GD_TOKEN`,
+`GITCODE_TOKEN`, or the system keyring. OpenLibing gate commands use separate
+OpenLibing GitCode OAuth credentials, because GitCode pull-request gate checks
+are provided by OpenLibing. Use `gd pipeline auth login` for browser OAuth, or provide
 `GD_OPENLIBING_TOKEN` or `GD_OPENLIBING_COOKIE` in automation. The OpenLibing
 gateway defaults to `https://www.openlibing.com/gateway` and can be overridden
 with `--openlibing-base` or `GD_OPENLIBING_BASE`.
@@ -111,8 +111,9 @@ For OpenLibing commands, `--project-id` is the OpenLibing project ID. `gd
 pipeline setup` records or updates the GitCode repository in OpenLibing,
 enables PR takeover and automatic gate triggering, applies the requested
 CodeCheck rule set, and asks OpenLibing to configure the webhook. If OpenLibing
-needs a repository robot token, pass `--public-token-env GITCODE_TOKEN` or
-another environment variable name; the token is never printed. `--repo
+needs a repository robot token, pass `--public-token-env GD_TOKEN`,
+`--public-token-env GITCODE_TOKEN`, or another environment variable name; the
+token is never printed. `--repo
 owner/repo` is optional for some queries, but recommended for PR check lookups
 because OpenLibing's GitCode PR endpoints accept owner and repository filters.
 If the OpenLibing CICD PR check endpoint is not readable, `gd pipeline checks`

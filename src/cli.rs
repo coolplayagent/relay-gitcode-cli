@@ -383,13 +383,8 @@ pub enum CliOutputFormat {
 pub struct GlobalArgs {
     #[arg(long, global = true, default_value = "gitcode.com")]
     pub hostname: String,
-    #[arg(
-        long,
-        global = true,
-        env = "GITCODE_API_BASE",
-        default_value = "https://api.gitcode.com/api/v5"
-    )]
-    pub api_base: String,
+    #[arg(long, global = true, value_name = "URL", help = "GitCode API base URL")]
+    pub api_base: Option<String>,
     #[arg(
         long,
         global = true,

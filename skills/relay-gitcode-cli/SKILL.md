@@ -33,7 +33,9 @@ aligned with the compiled CLI.
 `gd` reuses reqwest system proxy behavior for `HTTP_PROXY`/`http_proxy`,
 `HTTPS_PROXY`/`https_proxy`, `ALL_PROXY`/`all_proxy`, and
 `NO_PROXY`/`no_proxy`. TLS certificate verification is disabled by default for
-GitCode API calls.
+GitCode API calls. Set `GD_SSL_VERIFY`, `GITCODE_SSL_VERIFY`, or `SSL_VERIFY`
+to `true` to enable verification; any non-empty `GIT_SSL_NO_VERIFY` value keeps
+it disabled.
 
 ## Readiness
 
@@ -76,9 +78,10 @@ Do not install this skill by building `gd` from a local repository checkout.
 The bundled binaries and online fallbacks should come from released CLI
 artifacts.
 
-For temporary CI or end-to-end tests, prefer `GITCODE_TOKEN` in the process
-environment. For interactive token login, read the token from stdin and store it
-in the system keyring:
+For temporary CI or end-to-end tests, prefer `GD_TOKEN` or `GITCODE_TOKEN` in
+the process environment. `GD_TOKEN` takes precedence when both are present. For
+interactive token login, read the token from stdin and store it in the system
+keyring:
 
 ```bash
 printf '%s' "$GITCODE_TOKEN" | gd auth login --with-token --json
@@ -166,17 +169,17 @@ gd release migrate-github --repo owner/repo --github-repo source/repo --tag v0.1
 
 `gd release migrate-github` reads GitHub Release metadata and uploaded assets,
 then creates or updates GitCode Releases through GitCode Release APIs. It uses
-`GITHUB_TOKEN` when present for GitHub API reads, `GITCODE_TOKEN` or the system
-keyring for GitCode writes, and skips existing GitCode assets with matching
-names by default. Use `--update-release=false` to preserve existing GitCode
-Release metadata and `--skip-existing-assets=false` to fail on duplicate asset
-names.
+`GITHUB_TOKEN` when present for GitHub API reads, `GD_TOKEN`, `GITCODE_TOKEN`,
+or the system keyring for GitCode writes, and skips existing GitCode assets with
+matching names by default. Use `--update-release=false` to preserve existing
+GitCode Release metadata and `--skip-existing-assets=false` to fail on duplicate
+asset names.
 
 ## Pipelines
 
 GitCode workflow commands use GitCode API credentials. OpenLibing gate commands
 use separate OpenLibing GitCode OAuth credentials; they do not reuse
-`GITCODE_TOKEN`. Use `gd pipeline auth login` for browser OAuth, or set
+`GD_TOKEN` or `GITCODE_TOKEN`. Use `gd pipeline auth login` for browser OAuth, or set
 `GD_OPENLIBING_TOKEN` or `GD_OPENLIBING_COOKIE` for automation. Use the
 OpenLibing `--project-id`, not the GitCode repository id.
 

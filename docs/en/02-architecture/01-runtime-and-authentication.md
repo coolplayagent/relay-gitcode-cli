@@ -15,8 +15,8 @@
 
 ## Authentication Flow
 
-`GITCODE_TOKEN` is checked first. If it is not set, `gd` reads from the system
-keyring. Authenticated HTTP requests use:
+`GD_TOKEN` is checked first, followed by `GITCODE_TOKEN`. If neither is set,
+`gd` reads from the system keyring. Authenticated HTTP requests use:
 
 ```text
 Authorization: Bearer <token>
@@ -48,7 +48,10 @@ subprocesses. Blocking keyring calls are isolated with Tokio's blocking bridge.
 The shared reqwest client keeps reqwest system proxy behavior enabled, including
 `HTTP_PROXY`/`http_proxy`, `HTTPS_PROXY`/`https_proxy`,
 `ALL_PROXY`/`all_proxy`, and `NO_PROXY`/`no_proxy`. TLS certificate
-verification is disabled by default for GitCode API calls.
+verification is disabled by default for GitCode API calls. `GD_SSL_VERIFY`,
+`GITCODE_SSL_VERIFY`, and `SSL_VERIFY` can enable or disable verification, and
+any non-empty `GIT_SSL_NO_VERIFY` value is supported as the Git-style disable
+switch.
 
 ## Command Boundary
 

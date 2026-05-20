@@ -33,7 +33,8 @@ gd auth status
 ```
 
 `gd` 会把登录 token 保存到系统 keyring。CI 和临时端到端测试中，
-`GITCODE_TOKEN` 优先级更高，并且不会把凭证写入磁盘。
+`GD_TOKEN` 和 `GITCODE_TOKEN` 都能避免把凭证写入磁盘；两者同时存在时
+`GD_TOKEN` 优先级更高。
 
 ## API Host
 
@@ -43,7 +44,9 @@ gd auth status
 https://api.gitcode.com/api/v5
 ```
 
-测试兼容 host 时，可通过 `--api-base` 或 `GITCODE_API_BASE` 覆盖。
+测试兼容 host 时，可通过 `--api-base`、`GD_API_BASE` 或
+`GITCODE_API_BASE` 覆盖。优先级依次为 CLI flag、`GD_API_BASE`、
+`GITCODE_API_BASE`。
 
 ## 网络
 
@@ -51,4 +54,6 @@ https://api.gitcode.com/api/v5
 `HTTP_PROXY`/`http_proxy`、`HTTPS_PROXY`/`https_proxy`、
 `ALL_PROXY`/`all_proxy` 和 `NO_PROXY`/`no_proxy`。
 
-GitCode API 调用默认不校验 TLS 证书。
+GitCode API 调用默认不校验 TLS 证书。设置 `GD_SSL_VERIFY`、
+`GITCODE_SSL_VERIFY` 或 `SSL_VERIFY` 为 `true` 可启用证书校验；
+`GIT_SSL_NO_VERIFY` 为任意非空值时会保持禁用校验。
