@@ -2,6 +2,7 @@
 name: relay-gitcode-cli
 description: Use gd, the relay-gitcode-cli GitCode command line client, for GitCode API v5 workflows including authentication, repositories, pull requests, issues, search, SSH keys, labels, releases, GitCode Pipeline operations, raw API calls, JSON automation, version checks, and shell completion. Use when an agent should operate GitCode by running local gd commands. Do not use this skill for GitHub-only gh surfaces unless GitCode exposes an equivalent API through gd or gd api.
 metadata:
+  version: 0.0.0
   openclaw:
     skillKey: relay-gitcode-cli
     homepage: https://github.com/coolplayagent/relay-gitcode-cli
