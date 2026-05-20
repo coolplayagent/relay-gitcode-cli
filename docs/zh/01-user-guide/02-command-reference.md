@@ -29,6 +29,7 @@ gd repo move owner/repo target-owner/new-name
 gd repo move owner/repo target-owner --name new-name
 gd repo sync-github coolplayagent/relay-gitcode-cli --org plm-cac --private
 gd repo sync-github git@github.com:owner/repo.git --repo target-org/repo --if-exists skip
+gd repo sync-github owner/repo --repo target-org/repo --method git-push --if-exists update
 ```
 
 `gd repo move` 可将仓库迁移到另一个 GitCode 用户或组织名下。使用
@@ -38,7 +39,10 @@ gd repo sync-github git@github.com:owner/repo.git --repo target-org/repo --if-ex
 `gd repo sync-github` 会通过 GitHub 仓库 `import_url` 在 GitCode 创建并导入
 仓库。不传 `--org` 或 `--repo` 时导入到当前认证的 GitCode 用户命名空间；
 使用 `--org` 可导入组织，使用 `--repo owner/name` 可指定完整目标路径，
-使用 `--name` 可重命名导入项目。
+使用 `--name` 可重命名导入项目。使用 `--method git-push` 会创建普通 GitCode
+仓库，并用 Git 推送 GitHub 分支和标签，而不是启用 Pull 镜像；这样目标仓库仍可
+创建 GitCode Release。已有目标默认跳过；`--if-exists update` 会向已有普通目标
+推送 refs，`--if-exists recreate` 会删除并重建目标仓库。
 
 ## Issue 与 Pull Request 命令
 

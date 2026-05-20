@@ -295,18 +295,34 @@ async fn migrate_release(
             continue;
         }
 
-        let upload_url =
-            gitcode_release_upload_url(gitcode, &options.gitcode_repo, &release.tag_name).await?;
+        let upload = gitcode_release_upload(
+            gitcode,
+            &options.gitcode_repo,
+            &release.tag_name,
+            &asset.name,
+        )
+        .await?;
         let bytes = github.download_asset(asset).await?;
-        gitcode
-            .upload_multipart_bytes(
-                &upload_url,
-                &asset.name,
-                asset.content_type.as_deref(),
-                bytes,
-            )
-            .await
-            .with_context(|| format!("failed to upload GitCode release asset {}", asset.name))?;
+        if upload.headers.is_empty() {
+            gitcode
+                .upload_multipart_bytes(
+                    &upload.url,
+                    &asset.name,
+                    asset.content_type.as_deref(),
+                    bytes,
+                )
+                .await
+        } else {
+            gitcode
+                .upload_raw_bytes(
+                    &upload.url,
+                    &upload.headers,
+                    asset.content_type.as_deref(),
+                    bytes,
+                )
+                .await
+        }
+        .with_context(|| format!("failed to upload GitCode release asset {}", asset.name))?;
         assets.push(AssetMigrationRecord {
             name: asset.name.clone(),
             action: "uploaded".to_string(),
@@ -344,24 +360,31 @@ async fn gitcode_release_by_tag(
     Err(api_response_error(response))
 }
 
-async fn gitcode_release_upload_url(
+#[derive(Debug)]
+struct GitcodeReleaseUpload {
+    url: String,
+    headers: Vec<(String, String)>,
+}
+
+async fn gitcode_release_upload(
     gitcode: &GitcodeClient,
     repository: &str,
     tag: &str,
-) -> anyhow::Result<String> {
+    file_name: &str,
+) -> anyhow::Result<GitcodeReleaseUpload> {
     let response = gitcode
         .get_response(
             &format!(
                 "repos/{repository}/releases/{}/upload_url",
                 encode_path_segment(tag)
             ),
-            &[],
+            &[("file_name", file_name.to_string())],
         )
         .await?;
     if !response.status.is_success() {
         return Err(api_response_error(response));
     }
-    extract_upload_url(&response).context("GitCode upload_url response did not include a URL")
+    extract_upload(&response).context("GitCode upload_url response did not include a URL")
 }
 
 fn gitcode_release_body(release: &GithubRelease) -> Value {
@@ -411,8 +434,13 @@ fn collect_asset_names(value: &Value, names: &mut BTreeSet<String>) {
     }
 }
 
-fn extract_upload_url(response: &ApiResponse) -> Option<String> {
-    extract_upload_url_from_body(&response.body).or_else(|| header_url(&response.headers, LOCATION))
+fn extract_upload(response: &ApiResponse) -> Option<GitcodeReleaseUpload> {
+    let url = extract_upload_url_from_body(&response.body)
+        .or_else(|| header_url(&response.headers, LOCATION))?;
+    Some(GitcodeReleaseUpload {
+        url,
+        headers: extract_upload_headers(&response.body),
+    })
 }
 
 fn extract_upload_url_from_body(value: &Value) -> Option<String> {
@@ -438,6 +466,23 @@ fn header_url(headers: &HeaderMap, name: reqwest::header::HeaderName) -> Option<
         .and_then(|value| value.to_str().ok())
         .filter(|value| is_url(value))
         .map(str::to_string)
+}
+
+fn extract_upload_headers(value: &Value) -> Vec<(String, String)> {
+    if let Some(headers) = value.get("headers").and_then(Value::as_object) {
+        return headers
+            .iter()
+            .filter_map(|(name, value)| {
+                value
+                    .as_str()
+                    .map(|value| (name.to_string(), value.to_string()))
+            })
+            .collect();
+    }
+    if let Some(data) = value.get("data") {
+        return extract_upload_headers(data);
+    }
+    Vec::new()
 }
 
 fn is_url(value: &str) -> bool {
@@ -522,11 +567,47 @@ mod tests {
         let response = ApiResponse {
             status: StatusCode::OK,
             headers: HeaderMap::new(),
-            body: json!({"data": {"upload_url": "https://api.gitcode.com/upload"}}),
+            body: json!({
+                "data": {
+                    "upload_url": "https://api.gitcode.com/upload",
+                    "headers": {
+                        "Content-Type": "application/octet-stream"
+                    }
+                }
+            }),
         };
-        assert_eq!(
-            extract_upload_url(&response).as_deref(),
-            Some("https://api.gitcode.com/upload")
+        let upload = extract_upload(&response).unwrap();
+        assert_eq!(upload.url, "https://api.gitcode.com/upload");
+        assert!(upload.headers.contains(&(
+            "Content-Type".to_string(),
+            "application/octet-stream".to_string()
+        )));
+    }
+
+    #[test]
+    fn extracts_upload_headers() {
+        let response = ApiResponse {
+            status: StatusCode::OK,
+            headers: HeaderMap::new(),
+            body: json!({
+                "url": "https://file.gitcode.com/upload",
+                "headers": {
+                    "Content-Type": "application/octet-stream",
+                    "x-obs-acl": "private"
+                }
+            }),
+        };
+
+        let upload = extract_upload(&response).unwrap();
+        assert_eq!(upload.url, "https://file.gitcode.com/upload");
+        assert!(upload.headers.contains(&(
+            "Content-Type".to_string(),
+            "application/octet-stream".to_string()
+        )));
+        assert!(
+            upload
+                .headers
+                .contains(&("x-obs-acl".to_string(), "private".to_string()))
         );
     }
 
