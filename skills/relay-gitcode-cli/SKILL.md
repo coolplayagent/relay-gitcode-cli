@@ -99,7 +99,15 @@ gd repo list owner --limit 50 --json
 gd repo clone owner/repo
 gd repo create name --private --description "demo" --json
 gd repo fork owner/repo --json
+gd repo sync-github coolplayagent/relay-gitcode-cli --org plm-cac --private --json
+gd repo sync-github git@github.com:owner/repo.git --repo target-org/repo --if-exists skip --json
 ```
+
+`gd repo sync-github` accepts a GitHub `owner/repo`, HTTPS URL, or SSH URL and
+creates a GitCode repository with that GitHub repository as `import_url`.
+Without `--org` or `--repo`, it imports into the authenticated GitCode user
+namespace. Use `--org` for a GitCode organization and `--repo owner/name` for an
+explicit target path. Existing targets are skipped by default.
 
 Manage issues and pull requests with the GitCode-backed command surface:
 

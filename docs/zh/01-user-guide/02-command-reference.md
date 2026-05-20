@@ -25,7 +25,14 @@ gd repo list owner
 gd repo clone owner/repo
 gd repo create name --private --description "demo"
 gd repo fork owner/repo
+gd repo sync-github coolplayagent/relay-gitcode-cli --org plm-cac --private
+gd repo sync-github git@github.com:owner/repo.git --repo target-org/repo --if-exists skip
 ```
+
+`gd repo sync-github` 会通过 GitHub 仓库 `import_url` 在 GitCode 创建并导入
+仓库。不传 `--org` 或 `--repo` 时导入到当前认证的 GitCode 用户命名空间；
+使用 `--org` 可导入组织，使用 `--repo owner/name` 可指定完整目标路径，
+使用 `--name` 可重命名导入项目。
 
 ## Issue 与 Pull Request 命令
 

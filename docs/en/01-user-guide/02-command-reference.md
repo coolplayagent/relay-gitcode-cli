@@ -27,7 +27,14 @@ gd repo list owner
 gd repo clone owner/repo
 gd repo create name --private --description "demo"
 gd repo fork owner/repo
+gd repo sync-github coolplayagent/relay-gitcode-cli --org plm-cac --private
+gd repo sync-github git@github.com:owner/repo.git --repo target-org/repo --if-exists skip
 ```
+
+`gd repo sync-github` creates a GitCode repository from a GitHub repository
+`import_url`. Without `--org` or `--repo`, it imports into the authenticated
+GitCode user namespace. Use `--org` for an organization, `--repo owner/name` for
+an explicit target path, and `--name` to rename the imported project.
 
 ## Issue and Pull Request Commands
 

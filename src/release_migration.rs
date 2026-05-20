@@ -184,20 +184,21 @@ pub async fn migrate_github_releases(
     options: ReleaseMigrationOptions,
 ) -> anyhow::Result<ReleaseMigrationSummary> {
     validate_options(&options)?;
+    let github_repo = crate::repo::parse_github_repo(&options.github_repo)?;
     let github = GithubClient::new(http, options.github_token.clone());
     let releases = if options.all {
-        github.releases(&options.github_repo).await?
+        github.releases(&github_repo).await?
     } else {
         let tag = options
             .tag
             .as_deref()
             .expect("tag is required when --all is not set");
-        vec![github.release_by_tag(&options.github_repo, tag).await?]
+        vec![github.release_by_tag(&github_repo, tag).await?]
     };
 
     let mut summary = ReleaseMigrationSummary {
         gitcode_repo: options.gitcode_repo.clone(),
-        github_repo: options.github_repo.clone(),
+        github_repo,
         dry_run: options.dry_run,
         ..ReleaseMigrationSummary::default()
     };
@@ -213,7 +214,7 @@ pub async fn migrate_github_releases(
 
 fn validate_options(options: &ReleaseMigrationOptions) -> anyhow::Result<()> {
     crate::repo::split_repo(&options.gitcode_repo)?;
-    crate::repo::split_repo(&options.github_repo)?;
+    crate::repo::parse_github_repo(&options.github_repo)?;
     if options.all == options.tag.is_some() {
         bail!("set exactly one of --tag or --all");
     }

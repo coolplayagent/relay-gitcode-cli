@@ -58,6 +58,7 @@ gd repo list owner
 gd repo clone owner/repo
 gd repo create name --private --description "demo"
 gd repo fork owner/repo
+gd repo sync-github coolplayagent/relay-gitcode-cli --org plm-cac --private
 
 gd issue list --repo owner/repo
 gd issue view 1 --repo owner/repo

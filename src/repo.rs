@@ -47,6 +47,33 @@ pub fn clone_url(hostname: &str, repository: &str) -> String {
     format!("https://{hostname}/{repository}.git")
 }
 
+pub fn github_clone_url(repository: &str) -> String {
+    format!("https://github.com/{repository}.git")
+}
+
+pub fn parse_github_repo(input: &str) -> anyhow::Result<String> {
+    let trimmed = input.trim().trim_matches('/');
+    let without_git = trimmed.trim_end_matches(".git");
+    if let Some(rest) = without_git.strip_prefix("git@github.com:") {
+        split_repo(rest)?;
+        return Ok(rest.to_string());
+    }
+    if let Some(rest) = without_git.strip_prefix("https://github.com/") {
+        split_repo(rest)?;
+        return Ok(rest.to_string());
+    }
+    if let Some(rest) = without_git.strip_prefix("http://github.com/") {
+        split_repo(rest)?;
+        return Ok(rest.to_string());
+    }
+    if let Some(rest) = without_git.strip_prefix("ssh://git@github.com/") {
+        split_repo(rest)?;
+        return Ok(rest.to_string());
+    }
+    split_repo(trimmed)?;
+    Ok(trimmed.to_string())
+}
+
 pub async fn run_git_clone(
     hostname: &str,
     repository: &str,
@@ -104,6 +131,22 @@ mod tests {
         assert_eq!(
             parse_remote_url("https://gitcode.com/space/project.git").unwrap(),
             "space/project"
+        );
+    }
+
+    #[test]
+    fn parses_github_repository_inputs() {
+        assert_eq!(
+            parse_github_repo("coolplayagent/relay-gitcode-cli").unwrap(),
+            "coolplayagent/relay-gitcode-cli"
+        );
+        assert_eq!(
+            parse_github_repo("git@github.com:coolplayagent/relay-gitcode-cli.git").unwrap(),
+            "coolplayagent/relay-gitcode-cli"
+        );
+        assert_eq!(
+            parse_github_repo("https://github.com/coolplayagent/relay-gitcode-cli.git").unwrap(),
+            "coolplayagent/relay-gitcode-cli"
         );
     }
 }

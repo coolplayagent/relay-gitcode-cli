@@ -26,9 +26,10 @@ ClawHub package 会包含与 GitHub Release 归档相同的内置 assets。该 s
 
 GitHub 会把 secret 名称按大写保存，因此在仓库设置中创建的 `clawhub_token`
 会在 workflow 中作为 `CLAWHUB_TOKEN` 读取。配置 `GITCODE_TOKEN` 后，release
-workflow 会在 GitHub Release 发布后运行 `gd release migrate-github`。该 token
-需要具备在 `plm-cac/relay-gitcode-cli` 创建或更新 Release、上传 Release
-附件的权限。未配置 `GITCODE_TOKEN` 时会跳过 GitCode Release 同步。
+workflow 会在 GitHub Release 发布后运行 `gd repo sync-github` 和
+`gd release migrate-github`。该 token 需要具备创建缺失的目标 GitCode 仓库、
+在 `plm-cac/relay-gitcode-cli` 创建或更新 Release、上传 Release 附件的权限。
+未配置 `GITCODE_TOKEN` 时会跳过 GitCode 仓库和 Release 同步。
 
 ## GitCode 流水线
 

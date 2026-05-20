@@ -28,10 +28,11 @@ published release artifact or ClawHub package, not from a local checkout.
 GitHub stores secret names in uppercase, so a `clawhub_token` secret created in
 the repository settings is available to the workflow as `CLAWHUB_TOKEN`.
 Configure `GITCODE_TOKEN` to let the release workflow run
-`gd release migrate-github` after GitHub Release publication. The token needs
-permission to create or update Releases and upload Release assets in
-`plm-cac/relay-gitcode-cli`. If `GITCODE_TOKEN` is absent, GitCode Release sync
-is skipped.
+`gd repo sync-github` and `gd release migrate-github` after GitHub Release
+publication. The token needs permission to create the target GitCode repository
+when missing, create or update Releases, and upload Release assets in
+`plm-cac/relay-gitcode-cli`. If `GITCODE_TOKEN` is absent, GitCode repository
+and Release sync are skipped.
 
 ## GitCode Pipeline
 

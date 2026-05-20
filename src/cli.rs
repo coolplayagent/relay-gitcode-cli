@@ -528,6 +528,8 @@ pub enum RepoCommand {
     Fork(RepoRefArgs),
     #[command(about = "Create a repository")]
     Create(RepoCreateArgs),
+    #[command(about = "Sync a GitHub repository into GitCode")]
+    SyncGithub(RepoSyncGithubArgs),
 }
 
 #[derive(Debug, Args)]
@@ -562,6 +564,29 @@ pub struct RepoCreateArgs {
     pub private: bool,
     #[arg(long)]
     pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum RepoSyncIfExists {
+    Fail,
+    Skip,
+}
+
+#[derive(Debug, Args)]
+pub struct RepoSyncGithubArgs {
+    pub github_repo: String,
+    #[arg(short = 'R', long = "repo")]
+    pub repository: Option<String>,
+    #[arg(long)]
+    pub org: Option<String>,
+    #[arg(long)]
+    pub name: Option<String>,
+    #[arg(long)]
+    pub private: bool,
+    #[arg(long)]
+    pub description: Option<String>,
+    #[arg(long, value_enum, default_value_t = RepoSyncIfExists::Skip)]
+    pub if_exists: RepoSyncIfExists,
 }
 
 #[derive(Debug, Subcommand)]
@@ -1179,6 +1204,35 @@ mod tests {
         match cli.command {
             Command::Repo(RepoCommand::View(args)) => {
                 assert_eq!(args.repository.as_deref(), Some("owner/repo"));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_repo_sync_github() {
+        let cli = Cli::try_parse_from([
+            "gd",
+            "repo",
+            "sync-github",
+            "git@github.com:source/repo.git",
+            "--org",
+            "target-org",
+            "--name",
+            "target-repo",
+            "--private",
+            "--if-exists",
+            "skip",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Command::Repo(RepoCommand::SyncGithub(args)) => {
+                assert_eq!(args.github_repo, "git@github.com:source/repo.git");
+                assert_eq!(args.org.as_deref(), Some("target-org"));
+                assert_eq!(args.name.as_deref(), Some("target-repo"));
+                assert!(args.private);
+                assert_eq!(args.if_exists, RepoSyncIfExists::Skip);
             }
             other => panic!("unexpected command: {other:?}"),
         }

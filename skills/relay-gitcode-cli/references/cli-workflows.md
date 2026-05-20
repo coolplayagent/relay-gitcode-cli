@@ -93,7 +93,15 @@ Create or fork repositories:
 ```bash
 gd repo create demo --private --description "demo repository" --json
 gd repo fork owner/repo --json
+gd repo sync-github coolplayagent/relay-gitcode-cli --org plm-cac --private --json
+gd repo sync-github git@github.com:owner/repo.git --repo target-org/repo --if-exists skip --json
 ```
+
+Use `gd repo sync-github` to create a GitCode repository from a GitHub
+`import_url`. The source accepts `owner/repo`, HTTPS, or SSH GitHub URLs. Omit
+`--org` and `--repo` to import into the authenticated GitCode user namespace,
+pass `--org` for an organization, or pass `--repo owner/name` for an explicit
+target path. Existing targets are skipped by default.
 
 ## Issue and Pull Request Workflows
 

@@ -272,7 +272,149 @@ async fn repo_command(
             let value = client.post("user/repos", &body).await?;
             print_value(json_output, &value)
         }
+        RepoCommand::SyncGithub(args) => {
+            let value = sync_github_repo(args, client).await?;
+            print_value(json_output, &value)
+        }
     }
+}
+
+async fn sync_github_repo(
+    args: crate::cli::RepoSyncGithubArgs,
+    client: &GitcodeClient,
+) -> anyhow::Result<Value> {
+    let github_repo = repo::parse_github_repo(&args.github_repo)?;
+    let (_, github_name) = repo::split_repo(&github_repo)?;
+    let import_url = repo::github_clone_url(&github_repo);
+    let current_user = if args.org.is_none() {
+        Some(current_user_login(client).await?)
+    } else {
+        None
+    };
+    let target = repo_sync_target(&args, github_name, current_user.as_deref())?;
+
+    if let Some(existing) = existing_gitcode_repo(client, &target.repository).await? {
+        if args.if_exists == crate::cli::RepoSyncIfExists::Skip {
+            return Ok(json!({
+                "action": "skipped_existing",
+                "source": {
+                    "provider": "github",
+                    "repository": github_repo,
+                    "import_url": import_url,
+                },
+                "target": {
+                    "repository": target.repository,
+                },
+                "repository": existing,
+            }));
+        }
+        bail!(
+            "target GitCode repository already exists: {}",
+            target.repository
+        );
+    }
+
+    let description = args
+        .description
+        .unwrap_or_else(|| format!("Mirror of https://github.com/{github_repo}"));
+    let mut fields = vec![
+        ("name", Some(target.name.clone())),
+        ("description", Some(description)),
+        ("private", Some(args.private.to_string())),
+        ("import_url", Some(import_url.clone())),
+    ];
+    if target.create_endpoint.starts_with("orgs/") {
+        fields.push(("path", Some(target.name.clone())));
+    }
+    let body = form_body(fields);
+    let repository = client.post(&target.create_endpoint, &body).await?;
+    Ok(json!({
+        "action": "created",
+        "source": {
+            "provider": "github",
+            "repository": github_repo,
+            "import_url": import_url,
+        },
+        "target": {
+            "repository": target.repository,
+        },
+        "repository": repository,
+    }))
+}
+
+struct RepoSyncTarget {
+    repository: String,
+    name: String,
+    create_endpoint: String,
+}
+
+fn repo_sync_target(
+    args: &crate::cli::RepoSyncGithubArgs,
+    github_name: &str,
+    current_user: Option<&str>,
+) -> anyhow::Result<RepoSyncTarget> {
+    if args.repository.is_some() && (args.org.is_some() || args.name.is_some()) {
+        bail!("use either --repo owner/name or --org/--name, not both");
+    }
+    if let Some(repository) = &args.repository {
+        let (owner, name) = repo::split_repo(repository)?;
+        let create_endpoint = if Some(owner) == current_user {
+            "user/repos".to_string()
+        } else {
+            format!("orgs/{owner}/repos")
+        };
+        return Ok(RepoSyncTarget {
+            repository: repository.to_string(),
+            name: name.to_string(),
+            create_endpoint,
+        });
+    }
+
+    let name = args.name.clone().unwrap_or_else(|| github_name.to_string());
+    if let Some(org) = &args.org {
+        return Ok(RepoSyncTarget {
+            repository: format!("{org}/{name}"),
+            name,
+            create_endpoint: format!("orgs/{org}/repos"),
+        });
+    }
+    let Some(current_user) = current_user else {
+        bail!("could not determine current GitCode user");
+    };
+    Ok(RepoSyncTarget {
+        repository: format!("{current_user}/{name}"),
+        name,
+        create_endpoint: "user/repos".to_string(),
+    })
+}
+
+async fn existing_gitcode_repo(
+    client: &GitcodeClient,
+    repository: &str,
+) -> anyhow::Result<Option<Value>> {
+    let response = client
+        .get_response(&format!("repos/{repository}"), &[])
+        .await?;
+    if response.status.is_success() {
+        return Ok(Some(response.body));
+    }
+    if response.status.as_u16() == 400 || response.status.as_u16() == 404 {
+        return Ok(None);
+    }
+    bail!(
+        "GitCode API returned {}: {}",
+        response.status,
+        response.body
+    );
+}
+
+async fn current_user_login(client: &GitcodeClient) -> anyhow::Result<String> {
+    let value = client.get("user", &[]).await?;
+    value
+        .get("login")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .context("GitCode user response did not include login")
 }
 
 async fn issue_command(
